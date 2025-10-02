@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import argparse
 import shutil
+from datetime import datetime
 from typing import Tuple, List, Literal, Optional, Dict
 
 import numpy as np
@@ -56,41 +57,23 @@ def _supports_color(no_color_flag: bool) -> bool:
 
 class _C:
     def __init__(self, enabled: bool):
-        n = "" if enabled else ""
-        self.RESET = n
-        self.DIM = "\033[2m" if enabled else ""
-        self.BOLD = "\033[1m" if enabled else ""
-        self.CYAN = "\033[36m" if enabled else ""
+        self.enabled = enabled
+        self.RESET  = "\033[0m"  if enabled else ""
+        self.DIM    = "\033[2m"  if enabled else ""
+        self.BOLD   = "\033[1m"  if enabled else ""
+        self.CYAN   = "\033[36m" if enabled else ""
         self.YELLOW = "\033[33m" if enabled else ""
-        self.GREEN = "\033[32m" if enabled else ""
-        self.MAGENTA = "\033[35m" if enabled else ""
-        self.BLUE = "\033[34m" if enabled else ""
+        self.GREEN  = "\033[32m" if enabled else ""
+        self.MAGENTA= "\033[35m" if enabled else ""
+        self.BLUE   = "\033[34m" if enabled else ""
 
-def _term_width(default: int = 100) -> int:
+def _term_width(default: int = 96) -> int:
     try:
         return shutil.get_terminal_size((default, 20)).columns
     except Exception:
         return default
 
-def _hr(width: int, c: _C) -> str:
-    return f"{c.DIM}{'─'*width}{c.RESET}"
-
-def _box(title: str, body_lines: List[str], c: _C, width: int | None = None) -> str:
-    width = width or _term_width()
-    border = "─" * (width - 2)
-    out = [f"{c.CYAN}┌{border}┐{c.RESET}"]
-    title_line = f" {title} "
-    pad = max(0, width - 2 - len(title_line))
-    out.append(f"{c.CYAN}│{c.RESET}{c.BOLD}{title_line}{c.RESET}{' '*pad}{c.CYAN}│{c.RESET}")
-    out.append(f"{c.CYAN}├{border}┤{c.RESET}")
-    for ln in body_lines:
-        for sub in _wrap(ln, width - 4):
-            pad = max(0, width - 4 - len(sub))
-            out.append(f"{c.CYAN}│{c.RESET} {sub}{' '*pad} {c.CYAN}│{c.RESET}")
-    out.append(f"{c.CYAN}└{border}┘{c.RESET}")
-    return "\n".join(out)
-
-def _wrap(s: str, width: int) -> List[str]:
+def _wrap(s: str, width: int) -> list[str]:
     if len(s) <= width:
         return [s]
     out, cur = [], ""
@@ -106,23 +89,66 @@ def _wrap(s: str, width: int) -> List[str]:
         out.append(cur)
     return out
 
-def _fmt_shape(arr: tuple | list | np.ndarray) -> str:
-    if isinstance(arr, np.ndarray):
-        return "×".join(map(str, arr.shape))
-    if isinstance(arr, (tuple, list)):
-        return "×".join(map(str, arr))
-    return str(arr)
-
-def _kv_lines(d: Dict[str, object]) -> List[str]:
-    lines = []
-    for k, v in d.items():
-        if isinstance(v, dict):
-            lines.append(f"{k}:")
-            for sk, sv in v.items():
-                lines.append(f"  {sk}: {sv}")
-        else:
-            lines.append(f"{k}: {v}")
+def _kv_table(rows: list[tuple[str, str]], width: int, pad: int = 2) -> list[str]:
+    """Render aligned key: value lines as a compact message table."""
+    if not rows:
+        return []
+    key_w = min(max(len(k) for k,_ in rows), max(12, int(0.35*width)))
+    val_w = max(8, width - key_w - pad)
+    lines: list[str] = []
+    for k, v in rows:
+        k = (k[:key_w-1] + "…") if len(k) > key_w else k
+        wrapped = _wrap(v, val_w)
+        lines.append(f"{k.ljust(key_w)}: {wrapped[0]}")
+        for cont in wrapped[1:]:
+            lines.append(f"{' '*key_w}  {cont}")
     return lines
+
+def _bubble(title: str, body_lines: list[str], c: _C, align: str = "left", width: int | None = None) -> str:
+    """
+    Render a chat-style message bubble.
+    align: 'left' (incoming) or 'right' (outgoing)
+    """
+    width = min(_term_width(), width or _term_width())
+    max_inner = max(24, width - 10)           # inner text width
+    indent = 2 if align == "left" else max(2, width - (max_inner + 8))
+    pad = " " * indent
+
+    ts = datetime.now().strftime("%H:%M")
+    head = f"{c.BOLD}{title}{c.RESET}  {c.DIM}{ts}{c.RESET}"
+    head_lines = _wrap(head, max_inner)
+    lines = [pad + " " + head_lines[0]]
+    for hl in head_lines[1:]:
+        lines.append(pad + " " + hl)
+
+    # bubble
+    lines.append(pad + "  " + ("╭" + "─" * (max_inner + 2) + "╮"))
+    for ln in body_lines:
+        for wln in _wrap(ln, max_inner):
+            lines.append(pad + "  " + "│ " + wln.ljust(max_inner) + " │")
+    tail_left  = pad + "  " + "╰" + "─" * (max_inner + 2) + "╯" + "⟋"
+    tail_right = pad + " "  + "⟍" + "╰" + "─" * (max_inner + 2) + "╯"
+    lines.append(tail_left if align == "left" else tail_right)
+    return "\n".join(lines)
+
+def _panel(title: str, body_lines: list[str], c: _C, width: int | None = None) -> str:
+    """Box panel fallback (non-chat style)."""
+    width = width or _term_width()
+    border = "─" * (width - 2)
+    out = [f"{c.CYAN}┌{border}┐{c.RESET}"]
+    title_line = f" {title} "
+    pad = max(0, width - 2 - len(title_line))
+    out.append(f"{c.CYAN}│{c.RESET}{c.BOLD}{title_line}{c.RESET}{' '*pad}{c.CYAN}│{c.RESET}")
+    out.append(f"{c.CYAN}├{border}┤{c.RESET}")
+    for ln in body_lines:
+        for sub in _wrap(ln, width - 4):
+            pad = max(0, width - 4 - len(sub))
+            out.append(f"{c.CYAN}│{c.RESET} {sub}{' '*pad} {c.CYAN}│{c.RESET}")
+    out.append(f"{c.CYAN}└{border}┘{c.RESET}")
+    return "\n".join(out)
+
+def _render_card(title: str, body_lines: list[str], c: _C, style: str = "chat", align: str = "left") -> str:
+    return _bubble(title, body_lines, c, align=align) if style == "chat" else _panel(title, body_lines, c)
 
 
 # ================================ Summaries ===================================
@@ -131,16 +157,13 @@ def _summarize_df(df: pd.DataFrame, name: str, peek: int = 5) -> List[str]:
     lines: List[str] = []
     lines.append(f"{name}")
     lines.append(f"shape: {df.shape[0]} rows × {df.shape[1]} cols")
-    # columns (trim if very long)
     cols = list(df.columns)
     col_str = ", ".join(cols)
-    lines.append("columns: " + col_str if len(col_str) < 160 else "columns: " + ", ".join(cols[:12]) + ", ...")
-    # dtypes / NA counts (only non-zero NA counts shown)
+    lines.append("columns: " + col_str if len(col_str) < 160 else "columns: " + ", ".join(cols[:12]) + ", …")
     dtypes = df.dtypes.astype(str).to_dict()
     na_counts = {k: int(v) for k, v in df.isna().sum().items() if int(v) > 0}
     lines.append("dtypes: " + ", ".join([f"{k}:{v}" for k, v in dtypes.items()]))
     lines.append("na_counts: " + (str(na_counts) if na_counts else "{}"))
-    # value counts of common message fields
     for col in ("type", "direction"):
         if col in df.columns:
             try:
@@ -148,7 +171,6 @@ def _summarize_df(df: pd.DataFrame, name: str, peek: int = 5) -> List[str]:
                 lines.append(f"value_counts[{col}]: {vc}")
             except Exception:
                 pass
-    # time range + monotonic check
     if "time" in df.columns:
         try:
             t = pd.to_datetime(df["time"], errors="coerce", unit=None)
@@ -158,17 +180,15 @@ def _summarize_df(df: pd.DataFrame, name: str, peek: int = 5) -> List[str]:
                 lines.append(f"time monotonic nondecreasing: {is_mono}")
         except Exception:
             pass
-    # numeric quick stats (only a few cols to keep output tidy)
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if num_cols:
         sample_cols = num_cols[:6]
         desc = df[sample_cols].describe().to_dict()
         desc = {k: {m: float(v) for m, v in stats.items()} for k, stats in desc.items()}
-        lines.append("describe(sample of numeric cols):")
+        lines.append("describe(sample numeric cols):")
         for k, stats in desc.items():
             stats_str = ", ".join([f"{m}={val:.4g}" for m, val in stats.items()])
             lines.append(f"  {k}: {stats_str}")
-    # head / tail
     if peek > 0:
         lines.append("head:")
         lines.append(df.head(peek).to_string(index=False))
@@ -288,7 +308,7 @@ class LOBSTERData:
         )
         lines = []
         lines += _summarize_df(msg_df, "message_10.csv", peek=peek)
-        lines.append("")  # spacer
+        lines.append("")  # spacer between the two tables
         lines += _summarize_df(ob_df, "orderbook_10.csv", peek=peek)
         return lines
 
@@ -475,53 +495,72 @@ class LOBSTERData:
         return W
 
 
-# ============================ CLI and nice output =============================
+# ============================ CLI and message output ==========================
 
-def _print_dir_listing(path: str, c: _C) -> None:
+def _print_dir_listing(path: str, c: _C, style: str) -> None:
     if os.path.isdir(path):
         files = sorted(os.listdir(path))
-        lines = [f"path: {path}", f"files: {len(files)}"]
-        lines += [f"  - {f}" for f in files[:12]]
-        if len(files) > 12:
-            lines.append(f"  ... (+{len(files)-12} more)")
+        body = [f"path: {path}", f"files: {len(files)}"]
+        body += [f"• {f}" for f in files[:10]]
+        if len(files) > 10:
+            body.append(f"• (+{len(files)-10} more)")
     else:
-        lines = [f"path: {path}", "files: (missing)"]
-    print(_box("Data directory", lines, c))
+        body = [f"path: {path}", "files: (missing)"]
+    print(_render_card("Data directory", body, c, style=style, align="left"))
 
-def _print_summary(lines: List[str], c: _C) -> None:
-    print(_box("CSV Summary", lines, c))
+def _print_summary(lines: list[str], c: _C, style: str) -> None:
+    # split into two bubbles by blank line
+    if "" in lines:
+        idx = lines.index("")
+        msg_part = lines[:idx]
+        ob_part  = lines[idx+1:]
+    else:
+        msg_part, ob_part = lines, []
 
-def _print_report(W_train, W_val, W_test, meta: Dict[str, object], c: _C) -> None:
-    shapes = {
-        "train windows": _fmt_shape(W_train.shape),
-        "val windows": _fmt_shape(W_val.shape),
-        "test windows": _fmt_shape(W_test.shape),
-        "seq_len": meta.get("seq_len"),
-        "stride": meta.get("stride"),
-        "feature_set": meta.get("feature_set"),
-        "features": len(meta.get("feature_names", [])),
-        "scaler": meta.get("scaler"),
-        "sorted_by_time": meta.get("sorted_by_time"),
-        "every": meta.get("every"),
-    }
-    lines = _kv_lines(shapes)
+    def split_title(block: list[str]) -> tuple[str, list[str]]:
+        if not block:
+            return ("", [])
+        title, body = block[0], block[1:]
+        return (title, body)
+
+    t1, b1 = split_title(msg_part)
+    if t1:
+        print(_render_card(f"🟣 {t1}", b1, c, style=style, align="left"))
+    t2, b2 = split_title(ob_part)
+    if t2:
+        print(_render_card(f"🟢 {t2}", b2, c, style=style, align="left"))
+
+def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str) -> None:
+    block1 = [
+        ("train windows", "×".join(map(str, W_train.shape))),
+        ("val windows",   "×".join(map(str, W_val.shape))),
+        ("test windows",  "×".join(map(str, W_test.shape))),
+        ("seq_len",       str(meta.get("seq_len"))),
+        ("stride",        str(meta.get("stride"))),
+        ("feature_set",   str(meta.get("feature_set"))),
+        ("#features",     str(len(meta.get("feature_names", [])))),
+        ("scaler",        str(meta.get("scaler"))),
+        ("sorted_by_time",str(meta.get("sorted_by_time"))),
+        ("every",         str(meta.get("every"))),
+    ]
+    lines1 = _kv_table(block1, width=min(_term_width(), 84))
+    print(_render_card("Preprocessing report", lines1, c, style=style, align="right"))
+
     rc = meta.get("row_counts", {})
     if rc:
-        lines.append("")
-        lines.append("row_counts:")
-        for k, v in rc.items():
-            lines.append(f"  {k}: {v}")
-    print(_box("Preprocessing Report", lines, c))
+        block2 = [(k, str(v)) for k, v in rc.items()]
+        lines2 = _kv_table(block2, width=min(_term_width(), 84))
+        print(_render_card("Row counts", lines2, c, style=style, align="right"))
 
-    # quick sample stats on first window (if exists)
     if getattr(W_train, "size", 0):
         win = W_train[0]
-        stats = {
-            "window[0] mean": f"{float(win.mean()):.5f}",
-            "window[0] std": f"{float(win.std()):.5f}",
-            "feature_names (first 8)": ", ".join(meta.get("feature_names", [])[:8]) + ("..." if len(meta.get("feature_names", [])) > 8 else "")
-        }
-        print(_box("Sample Window Stats", _kv_lines(stats), c))
+        block3 = [
+            ("window[0] mean", f"{float(win.mean()):.6f}"),
+            ("window[0] std",  f"{float(win.std()):.6f}"),
+            ("features", ", ".join(meta.get("feature_names", [])[:8]) + ("…" if len(meta.get("feature_names", []))>8 else "")),
+        ]
+        lines3 = _kv_table(block3, width=min(_term_width(), 84))
+        print(_render_card("Sample window", lines3, c, style=style, align="right"))
 
 def _main_cli():
     parser = argparse.ArgumentParser(description="LOBSTERData (preprocess + summarize).")
@@ -545,11 +584,12 @@ def _main_cli():
     parser.add_argument("--sort-by-time", action="store_true")
     parser.add_argument("--every", type=int, default=1)
     parser.add_argument("--clip-quantiles", type=float, nargs=2, metavar=("QMIN", "QMAX"), default=None)
+    parser.add_argument("--style", choices=["chat", "box"], default="chat", help="Output style")
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors in output")
     args = parser.parse_args()
 
     c = _C(_supports_color(args.no_color))
-    _print_dir_listing(args.data_dir, c)
+    _print_dir_listing(args.data_dir, c, style=args.style)
 
     loader = LOBSTERData(
         data_dir=args.data_dir,
@@ -572,12 +612,12 @@ def _main_cli():
 
     if args.summary:
         lines = loader.summarize(peek=args.peek)
-        _print_summary(lines, c)
+        _print_summary(lines, c, style=args.style)
         return
 
     W_train, W_val, W_test = loader.load_arrays()
     meta = loader.get_meta()
-    _print_report(W_train, W_val, W_test, meta, c)
+    _print_report(W_train, W_val, W_test, meta, c, style=args.style)
 
     if args.save_npz:
         np.savez_compressed(
@@ -586,7 +626,7 @@ def _main_cli():
             feature_names=np.array(loader.get_feature_names(), dtype=object),
             meta=np.array([str(meta)], dtype=object),
         )
-        print(_box("Saved", [f"path: {args.save_npz}"], c))
+        print(_render_card("💾 Saved", [f"path: {args.save_npz}"], c, style=args.style, align="right"))
 
 
 if __name__ == "__main__":
