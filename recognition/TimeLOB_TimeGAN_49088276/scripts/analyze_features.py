@@ -55,7 +55,6 @@ from sklearn.decomposition import PCA
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.preprocessing import StandardScaler
 
-
 EPS = 1e-9
 TICK_SCALE = 10_000.0  # LOBSTER price ticks: quoted as price * 10_000
 
@@ -93,7 +92,8 @@ def load_lobster(orderbook_csv: str, message_csv: str) -> Tuple[pd.DataFrame, pd
 
     n = min(len(ob), len(msg))
     if len(ob) != len(msg):
-        print(f"[warn] Row mismatch (orderbook={len(ob)}, message={len(msg)}). Truncating to {n}.")
+        print(
+            f"[warn] Row mismatch (orderbook={len(ob)}, message={len(msg)}). Truncating to {n}.")
         ob = ob.iloc[:n].reset_index(drop=True)
         msg = msg.iloc[:n].reset_index(drop=True)
 
@@ -114,16 +114,19 @@ def compute_features(ob: pd.DataFrame, msg: pd.DataFrame) -> pd.DataFrame:
     bid_sizes = [f"bid_size_{i}" for i in range(1, 11)]
 
     queue_imbalance_l1 = (
-        (ob["bid_size_1"] - ob["ask_size_1"]) / (ob["bid_size_1"] + ob["ask_size_1"] + EPS)
+            (ob["bid_size_1"] - ob["ask_size_1"]) /
+            (ob["bid_size_1"] + ob["ask_size_1"] + EPS)
     )
 
     cum_bid_5 = ob[[f"bid_size_{i}" for i in range(1, 6)]].sum(axis=1)
     cum_ask_5 = ob[[f"ask_size_{i}" for i in range(1, 6)]].sum(axis=1)
-    depth_imbalance_l5 = (cum_bid_5 - cum_ask_5) / (cum_bid_5 + cum_ask_5 + EPS)
+    depth_imbalance_l5 = (cum_bid_5 - cum_ask_5) / \
+                         (cum_bid_5 + cum_ask_5 + EPS)
 
     cum_bid_10 = ob[bid_sizes].sum(axis=1)
     cum_ask_10 = ob[ask_sizes].sum(axis=1)
-    depth_imbalance_l10 = (cum_bid_10 - cum_ask_10) / (cum_bid_10 + cum_ask_10 + EPS)
+    depth_imbalance_l10 = (cum_bid_10 - cum_ask_10) / \
+                          (cum_bid_10 + cum_ask_10 + EPS)
 
     cum_depth_bid_10 = cum_bid_10
     cum_depth_ask_10 = cum_ask_10
@@ -180,17 +183,18 @@ def compute_pca(feats: pd.DataFrame, n_components: int = 5) -> Tuple[np.ndarray,
     X_pca = pca.fit_transform(X_std)
     var_ratio = pca.explained_variance_ratio_
     loadings = pd.DataFrame(
-        pca.components_.T, index=feats.columns, columns=[f"PC{i+1}" for i in range(n_components)]
+        pca.components_.T, index=feats.columns, columns=[
+            f"PC{i + 1}" for i in range(n_components)]
     )
     return var_ratio, loadings
 
 
 def greedy_select_5(
-    mi_next: Dict[str, float],
-    mi_spr: Dict[str, float],
-    corr: pd.DataFrame,
-    must_include: List[str] | None = None,
-    lambda_red: float = 0.5,
+        mi_next: Dict[str, float],
+        mi_spr: Dict[str, float],
+        corr: pd.DataFrame,
+        must_include: List[str] | None = None,
+        lambda_red: float = 0.5,
 ) -> Tuple[List[str], Dict[str, Dict[str, float]]]:
     """
     Greedy mRMR-like selection:
@@ -204,7 +208,8 @@ def greedy_select_5(
     all_feats = list(mi_next.keys())
     mi_next_arr = np.array([mi_next[f] for f in all_feats])
     mi_spr_arr = np.array([mi_spr[f] for f in all_feats])
-    mi_next_norm = (mi_next_arr - mi_next_arr.min()) / (np.ptp(mi_next_arr) + EPS)
+    mi_next_norm = (mi_next_arr - mi_next_arr.min()) / \
+                   (np.ptp(mi_next_arr) + EPS)
     mi_spr_norm = (mi_spr_arr - mi_spr_arr.min()) / (np.ptp(mi_spr_arr) + EPS)
     mi_combo = 0.6 * mi_next_norm + 0.4 * mi_spr_norm
     mi_combo_dict = {f: float(v) for f, v in zip(all_feats, mi_combo)}
@@ -262,7 +267,8 @@ def plot_bar(values: Dict[str, float], title: str, ylabel: str, outpath: str) ->
 
 def plot_corr_heatmap(corr: pd.DataFrame, title: str, outpath: str) -> None:
     plt.figure(figsize=(7.5, 6.5))
-    im = plt.imshow(corr.values, vmin=-1, vmax=1, interpolation="nearest", aspect="auto")
+    im = plt.imshow(corr.values, vmin=-1, vmax=1,
+                    interpolation="nearest", aspect="auto")
     plt.colorbar(im, fraction=0.035, pad=0.04)
     plt.xticks(range(len(corr)), corr.columns, rotation=45, ha="right")
     plt.yticks(range(len(corr)), corr.index)
@@ -299,16 +305,17 @@ def plot_pca(var_ratio: np.ndarray, loadings: pd.DataFrame, outdir: str) -> None
 
 
 def write_summary(
-    out: AnalysisOutputs,
-    outdir: str,
-    fixed_keep: List[str] | None = None,
+        out: AnalysisOutputs,
+        outdir: str,
+        fixed_keep: List[str] | None = None,
 ) -> None:
     if fixed_keep is None:
         fixed_keep = ["mid_price", "spread"]
 
     md = []
     md.append("# Feature analysis summary\n")
-    md.append("**Final selected 5 features:** " + ", ".join(out.selected5) + "\n")
+    md.append("**Final selected 5 features:** " +
+              ", ".join(out.selected5) + "\n")
     md.append("We pin *mid_price* and *spread* as must-haves because your report metrics directly use "
               "the mid-price return distribution and the spread; the remaining three are chosen by "
               "a greedy mRMR-style criterion that balances relevance (MI) and redundancy.\n")
@@ -317,10 +324,12 @@ def write_summary(
     md.append("- We compute MI with **next-step mid_log_return** (predictive dynamics) and with the "
               "**current spread** (distributional target). Higher is better.\n")
     md.append("\n**Top MI (next-step return)**\n\n")
-    top_mi_next = sorted(out.mi_next_return.items(), key=lambda x: x[1], reverse=True)
+    top_mi_next = sorted(out.mi_next_return.items(),
+                         key=lambda x: x[1], reverse=True)
     md.extend([f"- {k}: {v:.4f}" for k, v in top_mi_next[:5]])
     md.append("\n**Top MI (spread)**\n\n")
-    top_mi_spr = sorted(out.mi_spread.items(), key=lambda x: x[1], reverse=True)
+    top_mi_spr = sorted(out.mi_spread.items(),
+                        key=lambda x: x[1], reverse=True)
     md.extend([f"- {k}: {v:.4f}" for k, v in top_mi_spr[:5]])
     md.append("\n")
 
@@ -360,19 +369,22 @@ def run_analysis(orderbook_csv: str, message_csv: str, outdir: str) -> AnalysisO
     var_ratio, loadings = compute_pca(feats, n_components=5)
 
     # Plots/tables
-    plot_bar(mi_next, "MI with next-step mid_log_return", "MI", os.path.join(outdir, "mi_next.png"))
-    plot_bar(mi_spr, "MI with current spread", "MI", os.path.join(outdir, "mi_spread.png"))
+    plot_bar(mi_next, "MI with next-step mid_log_return",
+             "MI", os.path.join(outdir, "mi_next.png"))
+    plot_bar(mi_spr, "MI with current spread", "MI",
+             os.path.join(outdir, "mi_spread.png"))
     plot_corr_heatmap(corr, "Spearman correlation (10 engineered features)",
                       os.path.join(outdir, "corr_heatmap.png"))
     pd.DataFrame({"feature": list(mi_next.keys()),
                   "mi_next": list(mi_next.values()),
                   "mi_spread": [mi_spr[k] for k in mi_next.keys()],
-                 }).to_csv(os.path.join(outdir, "mi_scores.csv"), index=False)
+                  }).to_csv(os.path.join(outdir, "mi_scores.csv"), index=False)
     loadings.to_csv(os.path.join(outdir, "pca_loadings.csv"))
     plot_pca(var_ratio, loadings, outdir)
 
     # Greedy selection with mid_price, spread as must-keep
-    selected5, reasons = greedy_select_5(mi_next, mi_spr, corr, must_include=["mid_price", "spread"])
+    selected5, reasons = greedy_select_5(
+        mi_next, mi_spr, corr, must_include=["mid_price", "spread"])
     with open(os.path.join(outdir, "selected_features.json"), "w", encoding="utf-8") as f:
         json.dump({"selected5": selected5, "reasons": reasons}, f, indent=2)
 
@@ -391,16 +403,20 @@ def run_analysis(orderbook_csv: str, message_csv: str, outdir: str) -> AnalysisO
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Analyze LOBSTER features and justify a 5-feature set.")
-    ap.add_argument("--orderbook", required=True, help="Path to orderbook_10.csv")
+    ap = argparse.ArgumentParser(
+        description="Analyze LOBSTER features and justify a 5-feature set.")
+    ap.add_argument("--orderbook", required=True,
+                    help="Path to orderbook_10.csv")
     ap.add_argument("--message", required=True, help="Path to message_10.csv")
-    ap.add_argument("--outdir", required=True, help="Output directory for plots and tables")
+    ap.add_argument("--outdir", required=True,
+                    help="Output directory for plots and tables")
     return ap.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    run_analysis(orderbook_csv=args.orderbook, message_csv=args.message, outdir=args.outdir)
+    run_analysis(orderbook_csv=args.orderbook,
+                 message_csv=args.message, outdir=args.outdir)
     print(f"[done] Analysis complete. Results in: {args.outdir}")
 
 
