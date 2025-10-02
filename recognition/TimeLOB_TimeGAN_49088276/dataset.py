@@ -1,7 +1,16 @@
 """
-A module to tell to how we handle the dataset.
+Load and preprocess LOBSTER level-10 order book data for TimeGAN.
 
-Created By:
+This module provides a PyTorch Dataset and DataLoader factory that align,
+window, and scale limit order book features (e.g., top-10 bid/ask prices and
+size) into fixed-length sequences. Splits should be time-based to avoid
+leakage. Tensors are returned in that shape ``(seq_len, feature_dim)``.
+
+Exports:
+    - LOBSTERDataset
+    - make_dataloader
+
+Created By: Radhesh Goel (Keys-I)
 ID: s49088276
 
 References:
