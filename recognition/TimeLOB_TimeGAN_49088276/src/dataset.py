@@ -151,6 +151,27 @@ def _render_card(title: str, body_lines: list[str], c: _C, style: str = "chat", 
     return _bubble(title, body_lines, c, align=align) if style == "chat" else _panel(title, body_lines, c)
 
 
+# ============================== Verbose helpers ===============================
+
+def _fmt_bytes(n: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    f = float(n)
+    while f >= 1024 and i < len(units) - 1:
+        f /= 1024.0
+        i += 1
+    return f"{f:.2f} {units[i]}"
+
+def _first_last_time(msg_df: pd.DataFrame) -> tuple[str, str]:
+    if "time" not in msg_df.columns:
+        return ("", "")
+    try:
+        t = pd.to_datetime(msg_df["time"], errors="coerce", unit=None)
+        return (str(t.min()), str(t.max()))
+    except Exception:
+        return ("", "")
+
+
 # ================================ Summaries ===================================
 
 def _summarize_df(df: pd.DataFrame, name: str, peek: int = 5) -> List[str]:
@@ -530,7 +551,12 @@ def _print_summary(lines: list[str], c: _C, style: str) -> None:
     if t2:
         print(_render_card(f"🟢 {t2}", b2, c, style=style, align="left"))
 
-def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str) -> None:
+def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
+                  verbose: bool = False,
+                  scaler_obj = None,
+                  clip_bounds = None,
+                  time_coverage: tuple[str, str] = ("","")) -> None:
+    # Basic block
     block1 = [
         ("train windows", "×".join(map(str, W_train.shape))),
         ("val windows",   "×".join(map(str, W_val.shape))),
@@ -546,12 +572,14 @@ def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str) -> None
     lines1 = _kv_table(block1, width=min(_term_width(), 84))
     print(_render_card("Preprocessing report", lines1, c, style=style, align="right"))
 
+    # Row counts
     rc = meta.get("row_counts", {})
     if rc:
         block2 = [(k, str(v)) for k, v in rc.items()]
         lines2 = _kv_table(block2, width=min(_term_width(), 84))
         print(_render_card("Row counts", lines2, c, style=style, align="right"))
 
+    # Sample window stats
     if getattr(W_train, "size", 0):
         win = W_train[0]
         block3 = [
@@ -561,6 +589,78 @@ def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str) -> None
         ]
         lines3 = _kv_table(block3, width=min(_term_width(), 84))
         print(_render_card("Sample window", lines3, c, style=style, align="right"))
+
+    if not verbose:
+        return
+
+    # Verbose extras
+    vlines: list[str] = []
+    # Memory footprint
+    total_bytes = (W_train.nbytes if hasattr(W_train, "nbytes") else 0) + \
+                  (W_val.nbytes   if hasattr(W_val, "nbytes")   else 0) + \
+                  (W_test.nbytes  if hasattr(W_test, "nbytes")  else 0)
+    vlines.append(f"memory total: {_fmt_bytes(total_bytes)}")
+    vlines.append(f"train bytes: {_fmt_bytes(getattr(W_train, 'nbytes', 0))}")
+    vlines.append(f"val bytes:   {_fmt_bytes(getattr(W_val, 'nbytes', 0))}")
+    vlines.append(f"test bytes:  {_fmt_bytes(getattr(W_test, 'nbytes', 0))}")
+
+    # Time coverage if available
+    tmin, tmax = time_coverage
+    if tmin or tmax:
+        vlines.append(f"time coverage: {tmin}  →  {tmax}")
+
+    print(_render_card("Resources & coverage", vlines, c, style=style, align="right"))
+
+    # Scaler params
+    if scaler_obj is not None:
+        s_lines = []
+        if hasattr(scaler_obj, "mean_") and hasattr(scaler_obj, "scale_"):
+            # StandardScaler
+            means = scaler_obj.mean_
+            scales = scaler_obj.scale_
+            s_lines += _kv_table([
+                ("type", "StandardScaler"),
+                ("mean[0:8]",  np.array2string(means[:8], precision=4, separator=", ")),
+                ("scale[0:8]", np.array2string(scales[:8], precision=4, separator=", ")),
+            ], width=min(_term_width(), 84))
+        elif hasattr(scaler_obj, "data_min_") and hasattr(scaler_obj, "data_max_"):
+            # MinMaxScaler
+            s_lines += _kv_table([
+                ("type", "MinMaxScaler"),
+                ("data_min[0:8]", np.array2string(scaler_obj.data_min_[:8], precision=4, separator=", ")),
+                ("data_max[0:8]", np.array2string(scaler_obj.data_max_[:8], precision=4, separator=", ")),
+                ("feature_range", str(getattr(scaler_obj, "feature_range", None))),
+            ], width=min(_term_width(), 84))
+        if s_lines:
+            print(_render_card("Scaler parameters", s_lines, c, style=style, align="right"))
+
+    # Clip bounds preview
+    if clip_bounds is not None:
+        lo, hi = clip_bounds
+        cb_lines = _kv_table([
+            ("q-lo[0:8]", np.array2string(lo[:8], precision=4, separator=", ")),
+            ("q-hi[0:8]", np.array2string(hi[:8], precision=4, separator=", ")),
+        ], width=min(_term_width(), 84))
+        print(_render_card("Clip bounds (preview)", cb_lines, c, style=style, align="right"))
+
+    # Per-split window counts and overlap ratio
+    def _count_windows(n_rows: int, seq_len: int, stride: int) -> int:
+        if n_rows < seq_len:
+            return 0
+        return 1 + (n_rows - seq_len) // stride
+
+    rc_train = rc.get("train", 0)
+    rc_val   = rc.get("val", 0)
+    rc_test  = rc.get("test", 0)
+    overlap = 1.0 - (meta.get("stride", 1) / max(1, meta.get("seq_len", 1)))
+    perf = _kv_table([
+        ("expected train windows", str(_count_windows(rc_train, meta.get("seq_len", 0), meta.get("stride", 1)))),
+        ("expected val windows",   str(_count_windows(rc_val,   meta.get("seq_len", 0), meta.get("stride", 1)))),
+        ("expected test windows",  str(_count_windows(rc_test,  meta.get("seq_len", 0), meta.get("stride", 1)))),
+        ("overlap ratio",          f"{overlap:.3f}"),
+    ], width=min(_term_width(), 84))
+    print(_render_card("Windowing details", perf, c, style=style, align="right"))
+
 
 def _main_cli():
     parser = argparse.ArgumentParser(description="LOBSTERData (preprocess + summarize).")
@@ -586,6 +686,8 @@ def _main_cli():
     parser.add_argument("--clip-quantiles", type=float, nargs=2, metavar=("QMIN", "QMAX"), default=None)
     parser.add_argument("--style", choices=["chat", "box"], default="chat", help="Output style")
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors in output")
+    parser.add_argument("--verbose", action="store_true", help="Print extra diagnostics (memory, scaler, clip bounds)")
+    parser.add_argument("--meta-json", type=str, default=None, help="Optional path to dump meta JSON")
     args = parser.parse_args()
 
     c = _C(_supports_color(args.no_color))
@@ -617,8 +719,36 @@ def _main_cli():
 
     W_train, W_val, W_test = loader.load_arrays()
     meta = loader.get_meta()
-    _print_report(W_train, W_val, W_test, meta, c, style=args.style)
 
+    # verbose context
+    scaler_obj = loader.get_scaler()
+    clip_bounds = None
+    if meta.get("clip_bounds"):
+        lo = np.array(meta["clip_bounds"]["lo"], dtype=float)
+        hi = np.array(meta["clip_bounds"]["hi"], dtype=float)
+        clip_bounds = (lo, hi)
+
+    # best-effort message time coverage
+    try:
+        msg_df, _ = loader._load_csvs()
+        tmin, tmax = _first_last_time(msg_df)
+    except Exception:
+        tmin = tmax = ""
+
+    _print_report(
+        W_train, W_val, W_test, meta, c, style=args.style,
+        verbose=args.verbose, scaler_obj=scaler_obj,
+        clip_bounds=clip_bounds, time_coverage=(tmin, tmax)
+    )
+
+    # optional meta dump
+    if args.meta_json:
+        import json
+        with open(args.meta_json, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+        print(_render_card("Saved", [f"meta: {args.meta_json}"], c, style=args.style, align="right"))
+
+    # optional arrays NPZ
     if args.save_npz:
         np.savez_compressed(
             args.save_npz,
@@ -626,7 +756,7 @@ def _main_cli():
             feature_names=np.array(loader.get_feature_names(), dtype=object),
             meta=np.array([str(meta)], dtype=object),
         )
-        print(_render_card("💾 Saved", [f"path: {args.save_npz}"], c, style=args.style, align="right"))
+        print(_render_card("Saved", [f"windows: {args.save_npz}"], c, style=args.style, align="right"))
 
 
 if __name__ == "__main__":
