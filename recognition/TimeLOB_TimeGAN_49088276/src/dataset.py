@@ -68,8 +68,9 @@ class _C:
         self.GREEN  = "\033[32m" if enabled else ""
         self.MAGENTA= "\033[35m" if enabled else ""
         self.BLUE   = "\033[34m" if enabled else ""
+        self.RED    = "\033[31m" if enabled else ""
 
-def _term_width(default: int = 96) -> int:
+def _term_width(default: int = 100) -> int:
     try:
         return shutil.get_terminal_size((default, 20)).columns
     except Exception:
@@ -85,8 +86,7 @@ def _wrap(s: str, width: int) -> list[str]:
         elif len(cur) + 1 + len(tok) <= width:
             cur += " " + tok
         else:
-            out.append(cur)
-            cur = tok
+            out.append(cur); cur = tok
     if cur:
         out.append(cur)
     return out
@@ -117,14 +117,21 @@ def _is_table_line(s: str) -> bool:
         return True
     return False
 
-def _kv_table(rows: list[tuple[str, str]], width: int, pad: int = 2) -> list[str]:
+# Global table format (overridable via CLI)
+TABLE_FMT = "github"
+
+def _kv_table(rows: list[tuple[str, str]], width: int, c: _C, headers: tuple[str,str]=("key","value")) -> list[str]:
     """
     Render key–value rows as a compact 2-col table using tabulate.
     Returns a list of lines to embed inside bubbles/boxes.
     """
     if not rows:
         return []
-    table = tabulate(rows, headers=["key", "value"], tablefmt="github", stralign="left")
+    h_key  = f"{c.BOLD}{c.MAGENTA}{headers[0]}{c.RESET}" if c.enabled else headers[0]
+    h_val  = f"{c.BOLD}{c.MAGENTA}{headers[1]}{c.RESET}" if c.enabled else headers[1]
+    # tint keys
+    tinted = [(f"{c.CYAN}{k}{c.RESET}" if c.enabled else k, v) for k, v in rows]
+    table = tabulate(tinted, headers=[h_key, h_val], tablefmt=TABLE_FMT, stralign="left")
     return table.splitlines()
 
 def _bubble(title: str, body_lines: list[str], c: _C, align: str = "left", width: int | None = None) -> str:
@@ -139,7 +146,7 @@ def _bubble(title: str, body_lines: list[str], c: _C, align: str = "left", width
     # Baseline inner width
     base_inner = max(24, width - 10)
 
-    # If there are preformatted table lines, fit to the widest visible line
+    # Expand to widest table row if present
     widest_tbl = 0
     for ln in body_lines:
         if _is_table_line(ln):
@@ -152,7 +159,8 @@ def _bubble(title: str, body_lines: list[str], c: _C, align: str = "left", width
 
     # Header
     ts = datetime.now().strftime("%H:%M")
-    head = f"{c.BOLD}{title}{c.RESET}  {c.DIM}{ts}{c.RESET}"
+    title_colored = f"{c.BOLD}{c.BLUE}{title}{c.RESET}" if c.enabled else title
+    head = f"{title_colored}  {c.DIM}{ts}{c.RESET}"
     head_lines = _wrap(head, max_inner)
     lines = [pad + " " + head_lines[0]]
     for hl in head_lines[1:]:
@@ -165,11 +173,8 @@ def _bubble(title: str, body_lines: list[str], c: _C, align: str = "left", width
     for ln in body_lines:
         if _is_table_line(ln):
             vis = _visible_len(ln)
-            if vis <= max_inner:
-                out = ln + " " * (max_inner - vis)
-            else:
-                out = ln[:max_inner]
-            lines.append(pad + "  " + "│ " + out + " │")
+            out = ln + " " * max(0, max_inner - vis)
+            lines.append(pad + "  " + "│ " + out[:max_inner] + " │")
         else:
             for wln in _wrap(ln, max_inner):
                 lines.append(pad + "  " + "│ " + wln.ljust(max_inner) + " │")
@@ -195,22 +200,19 @@ def _panel(title: str, body_lines: list[str], c: _C, width: int | None = None) -
     width = inner + 4
 
     border = "─" * (width - 2)
+    title_colored = f"{c.BOLD}{c.BLUE}{title}{c.RESET}" if c.enabled else title
     out = [f"{c.CYAN}┌{border}┐{c.RESET}"]
-    title_line = f" {title} "
-    pad = max(0, width - 2 - len(title_line))
-    out.append(f"{c.CYAN}│{c.RESET}{c.BOLD}{title_line}{c.RESET}{' '*pad}{c.CYAN}│{c.RESET}")
+    title_line = f" {title_colored} "
+    pad = max(0, width - 2 - _visible_len(title_line))
+    out.append(f"{c.CYAN}│{c.RESET}{title_line}{' '*pad}{c.CYAN}│{c.RESET}")
     out.append(f"{c.CYAN}├{border}┤{c.RESET}")
 
     for ln in body_lines:
         if _is_table_line(ln):
             vis = _visible_len(ln)
-            # inner-2 for side spaces inside the box content
             width_ok = inner - 2
-            if vis <= width_ok:
-                body = ln + " " * (width_ok - vis)
-            else:
-                body = ln[:width_ok]
-            out.append(f"{c.CYAN}│{c.RESET} {body} {c.CYAN}│{c.RESET}")
+            body = ln + " " * max(0, width_ok - vis)
+            out.append(f"{c.CYAN}│{c.RESET} {body[:width_ok]} {c.CYAN}│{c.RESET}")
         else:
             for sub in _wrap(ln, inner - 2):
                 padlen = max(0, (inner - 2) - len(sub))
@@ -227,11 +229,9 @@ def _render_card(title: str, body_lines: list[str], c: _C, style: str = "chat", 
 
 def _fmt_bytes(n: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-    f = float(n)
+    i = 0; f = float(n)
     while f >= 1024 and i < len(units) - 1:
-        f /= 1024.0
-        i += 1
+        f /= 1024.0; i += 1
     return f"{f:.2f} {units[i]}"
 
 def _first_last_time(msg_df: pd.DataFrame) -> tuple[str, str]:
@@ -246,9 +246,10 @@ def _first_last_time(msg_df: pd.DataFrame) -> tuple[str, str]:
 
 # ================================ Summaries ===================================
 
-def _summarize_df(df: pd.DataFrame, name: str, peek: int = 5) -> List[str]:
+def _summarize_df(df: pd.DataFrame, name: str, peek: int, c: _C) -> List[str]:
     lines: List[str] = []
-    lines.append(f"{name}")
+    title = f"{c.BOLD}{name}{c.RESET}" if c.enabled else name
+    lines.append(title)
     lines.append(f"shape: {df.shape[0]} rows × {df.shape[1]} cols")
     cols = list(df.columns)
     col_str = ", ".join(cols)
@@ -279,16 +280,16 @@ def _summarize_df(df: pd.DataFrame, name: str, peek: int = 5) -> List[str]:
     if num_cols:
         sample_cols = num_cols[: min(8, len(num_cols))]
         desc_df = df[sample_cols].describe().round(6)
-        lines.append("describe(sample numeric cols):")
-        lines.extend(tabulate(desc_df, headers="keys", tablefmt="github").splitlines())
+        lines.append(f"{c.BOLD}describe(sample numeric cols):{c.RESET}" if c.enabled else "describe(sample numeric cols):")
+        lines.extend(tabulate(desc_df, headers="keys", tablefmt=TABLE_FMT).splitlines())
 
     # head / tail (pretty tables)
     if peek > 0:
-        lines.append("head:")
-        head_tbl = tabulate(df.head(peek), headers="keys", tablefmt="github", showindex=False)
+        lines.append(f"{c.BOLD}head:{c.RESET}" if c.enabled else "head:")
+        head_tbl = tabulate(df.head(peek), headers="keys", tablefmt=TABLE_FMT, showindex=False)
         lines.extend(head_tbl.splitlines())
-        lines.append("tail:")
-        tail_tbl = tabulate(df.tail(peek), headers="keys", tablefmt="github", showindex=False)
+        lines.append(f"{c.BOLD}tail:{c.RESET}" if c.enabled else "tail:")
+        tail_tbl = tabulate(df.tail(peek), headers="keys", tablefmt=TABLE_FMT, showindex=False)
         lines.extend(tail_tbl.splitlines())
 
     return lines
@@ -394,7 +395,7 @@ class LOBSTERData:
         W_test  = W_test.astype(self.output_dtype, copy=False)
         return W_train, W_val, W_test
 
-    def summarize(self, peek: int = 5) -> List[str]:
+    def summarize(self, peek: int, c: _C) -> List[str]:
         msg_df, ob_df = self._load_csvs()
         _ = self._normalize_orderbook_headers(
             ob_df,
@@ -404,9 +405,9 @@ class LOBSTERData:
             + [f"bid_size_{i}" for i in range(1, 11)]
         )
         lines = []
-        lines += _summarize_df(msg_df, "message_10.csv", peek=peek)
+        lines += _summarize_df(msg_df, "message_10.csv", peek=peek, c=c)
         lines.append("")  # spacer between the two tables
-        lines += _summarize_df(ob_df, "orderbook_10.csv", peek=peek)
+        lines += _summarize_df(ob_df, "orderbook_10.csv", peek=peek, c=c)
         return lines
 
     def get_feature_names(self) -> List[str]:
@@ -602,7 +603,7 @@ def _print_dir_listing(path: str, c: _C, style: str) -> None:
         if len(files) > 10:
             body.append(f"• (+{len(files)-10} more)")
     else:
-        body = [f"path: {path}", "files: (missing)"]
+        body = [f"path: {path}", f"{c.RED}files: (missing){c.RESET}" if c.enabled else "files: (missing)"]
     print(_render_card("Data directory", body, c, style=style, align="left"))
 
 def _print_summary(lines: list[str], c: _C, style: str) -> None:
@@ -622,10 +623,10 @@ def _print_summary(lines: list[str], c: _C, style: str) -> None:
 
     t1, b1 = split_title(msg_part)
     if t1:
-        print(_render_card(f"{t1}", b1, c, style=style, align="left"))
+        print(_render_card(t1, b1, c, style=style, align="left"))
     t2, b2 = split_title(ob_part)
     if t2:
-        print(_render_card(f"{t2}", b2, c, style=style, align="left"))
+        print(_render_card(t2, b2, c, style=style, align="left"))
 
 def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
                   verbose: bool = False,
@@ -645,14 +646,14 @@ def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
         ("sorted_by_time",str(meta.get("sorted_by_time"))),
         ("every",         str(meta.get("every"))),
     ]
-    lines1 = _kv_table(block1, width=min(_term_width(), 84))
+    lines1 = _kv_table(block1, width=min(_term_width(), 84), c=c)
     print(_render_card("Preprocessing report", lines1, c, style=style, align="right"))
 
     # Row counts
     rc = meta.get("row_counts", {})
     if rc:
         block2 = [(k, str(v)) for k, v in rc.items()]
-        lines2 = _kv_table(block2, width=min(_term_width(), 84))
+        lines2 = _kv_table(block2, width=min(_term_width(), 84), c=c)
         print(_render_card("Row counts", lines2, c, style=style, align="right"))
 
     # Sample window stats
@@ -663,7 +664,7 @@ def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
             ("window[0] std",  f"{float(win.std()):.6f}"),
             ("features", ", ".join(meta.get("feature_names", [])[:8]) + ("…" if len(meta.get("feature_names", []))>8 else "")),
         ]
-        lines3 = _kv_table(block3, width=min(_term_width(), 84))
+        lines3 = _kv_table(block3, width=min(_term_width(), 84), c=c)
         print(_render_card("Sample window", lines3, c, style=style, align="right"))
 
     if not verbose:
@@ -671,16 +672,14 @@ def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
 
     # Verbose extras
     vlines: list[str] = []
-    # Memory footprint
-    total_bytes = (W_train.nbytes if hasattr(W_train, "nbytes") else 0) + \
-                  (W_val.nbytes   if hasattr(W_val, "nbytes")   else 0) + \
-                  (W_test.nbytes  if hasattr(W_test, "nbytes")  else 0)
+    total_bytes = (getattr(W_train, "nbytes", 0) +
+                   getattr(W_val, "nbytes", 0) +
+                   getattr(W_test, "nbytes", 0))
     vlines.append(f"memory total: {_fmt_bytes(total_bytes)}")
     vlines.append(f"train bytes: {_fmt_bytes(getattr(W_train, 'nbytes', 0))}")
     vlines.append(f"val bytes:   {_fmt_bytes(getattr(W_val, 'nbytes', 0))}")
     vlines.append(f"test bytes:  {_fmt_bytes(getattr(W_test, 'nbytes', 0))}")
 
-    # Time coverage if available
     tmin, tmax = time_coverage
     if tmin or tmax:
         vlines.append(f"time coverage: {tmin}  →  {tmax}")
@@ -689,53 +688,47 @@ def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
 
     # Scaler params
     if scaler_obj is not None:
-        s_lines = []
+        s_rows = []
         if hasattr(scaler_obj, "mean_") and hasattr(scaler_obj, "scale_"):
-            # StandardScaler
-            means = scaler_obj.mean_
-            scales = scaler_obj.scale_
-            s_lines += _kv_table([
+            s_rows = [
                 ("type", "StandardScaler"),
-                ("mean[0:8]",  np.array2string(means[:8], precision=4, separator=", ")),
-                ("scale[0:8]", np.array2string(scales[:8], precision=4, separator=", ")),
-            ], width=min(_term_width(), 84))
+                ("mean[0:8]",  np.array2string(scaler_obj.mean_[:8],  precision=4, separator=", ")),
+                ("scale[0:8]", np.array2string(scaler_obj.scale_[:8], precision=4, separator=", ")),
+            ]
         elif hasattr(scaler_obj, "data_min_") and hasattr(scaler_obj, "data_max_"):
-            # MinMaxScaler
-            s_lines += _kv_table([
+            s_rows = [
                 ("type", "MinMaxScaler"),
                 ("data_min[0:8]", np.array2string(scaler_obj.data_min_[:8], precision=4, separator=", ")),
                 ("data_max[0:8]", np.array2string(scaler_obj.data_max_[:8], precision=4, separator=", ")),
                 ("feature_range", str(getattr(scaler_obj, "feature_range", None))),
-            ], width=min(_term_width(), 84))
-        if s_lines:
-            print(_render_card("Scaler parameters", s_lines, c, style=style, align="right"))
+            ]
+        if s_rows:
+            print(_render_card("Scaler parameters", _kv_table(s_rows, min(_term_width(),84), c=c), c, style=style, align="right"))
 
     # Clip bounds preview
     if clip_bounds is not None:
         lo, hi = clip_bounds
-        cb_lines = _kv_table([
+        cb_rows = [
             ("q-lo[0:8]", np.array2string(lo[:8], precision=4, separator=", ")),
             ("q-hi[0:8]", np.array2string(hi[:8], precision=4, separator=", ")),
-        ], width=min(_term_width(), 84))
-        print(_render_card("Clip bounds (preview)", cb_lines, c, style=style, align="right"))
+        ]
+        print(_render_card("Clip bounds (preview)", _kv_table(cb_rows, min(_term_width(),84), c=c), c, style=style, align="right"))
 
-    # Per-split window counts and overlap ratio
+    # Windowing math
     def _count_windows(n_rows: int, seq_len: int, stride: int) -> int:
         if n_rows < seq_len:
             return 0
         return 1 + (n_rows - seq_len) // stride
 
-    rc_train = rc.get("train", 0)
-    rc_val   = rc.get("val", 0)
-    rc_test  = rc.get("test", 0)
+    rc_train = rc.get("train", 0); rc_val = rc.get("val", 0); rc_test = rc.get("test", 0)
     overlap = 1.0 - (meta.get("stride", 1) / max(1, meta.get("seq_len", 1)))
-    perf = _kv_table([
+    perf_rows = [
         ("expected train windows", str(_count_windows(rc_train, meta.get("seq_len", 0), meta.get("stride", 1)))),
         ("expected val windows",   str(_count_windows(rc_val,   meta.get("seq_len", 0), meta.get("stride", 1)))),
         ("expected test windows",  str(_count_windows(rc_test,  meta.get("seq_len", 0), meta.get("stride", 1)))),
         ("overlap ratio",          f"{overlap:.3f}"),
-    ], width=min(_term_width(), 84))
-    print(_render_card("Windowing details", perf, c, style=style, align="right"))
+    ]
+    print(_render_card("Windowing details", _kv_table(perf_rows, min(_term_width(),84), c=c), c, style=style, align="right"))
 
 
 # ========================== Dataset info (report card) ========================
@@ -746,69 +739,56 @@ def _print_dataset_info(loader: "LOBSTERData", c: _C, style: str, peek: int = 5)
     feature_set = meta.get("feature_set")
     feats = meta.get("feature_names") or []
 
-    # Fallback feature names if meta is empty
+    # Fallback feature names if meta not populated
     if not feats:
         if feature_set == "core":
-            feats = [
-                "mid_price",
-                "spread",
-                "mid_log_return",
-                "queue_imbalance_l1",
-                "depth_imbalance_l10",
-            ]
+            feats = ["mid_price","spread","mid_log_return","queue_imbalance_l1","depth_imbalance_l10"]
         elif feature_set == "raw10":
-            feats = (
-                [f"ask_price_{i}" for i in range(1, 11)] +
-                [f"ask_size_{i}"  for i in range(1, 11)] +
-                [f"bid_price_{i}" for i in range(1, 11)] +
-                [f"bid_size_{i}"  for i in range(1, 11)]
-            )
+            feats = ([f"ask_price_{i}" for i in range(1,11)] +
+                     [f"ask_size_{i}" for i in range(1,11)] +
+                     [f"bid_price_{i}" for i in range(1,11)] +
+                     [f"bid_size_{i}" for i in range(1,11)])
 
-    lines: List[str] = [
-        f"Feature set: {feature_set}",
+    intro = [
+        f"Feature set: {c.BOLD}{feature_set}{c.RESET}" if c.enabled else f"Feature set: {feature_set}",
         f"Total features: {len(feats)}",
         ""
     ]
 
-    # aggregated statistics across splits (pretty tables)
     try:
         W_train, W_val, W_test = loader.load_arrays()
         if W_train.size + W_val.size + W_test.size == 0:
-            raise ValueError("No windows produced; consider lowering seq_len or stride.")
-        blocks = []
-        for W in (W_train, W_val, W_test):
-            if getattr(W, "size", 0):
-                blocks.append(W.reshape(-1, W.shape[-1]))
+            raise ValueError("No windows produced; lower seq_len or stride.")
+        blocks = [W.reshape(-1, W.shape[-1]) for W in (W_train, W_val, W_test) if getattr(W,"size",0)]
         all_data = np.concatenate(blocks, axis=0)
         df = pd.DataFrame(all_data, columns=feats)
 
         # describe()
-        lines.append("Statistical summary (aggregated across splits):")
+        intro.append(f"{c.BOLD}Statistical summary (aggregated across splits):{c.RESET}" if c.enabled else "Statistical summary (aggregated across splits):")
         desc_df = df.describe().round(6)
-        lines.extend(tabulate(desc_df, headers="keys", tablefmt="github").splitlines())
-        lines.append("")
+        intro.extend(tabulate(desc_df, headers="keys", tablefmt=TABLE_FMT).splitlines())
+        intro.append("")
 
         # peaks: means and stds tables
         means = df.mean().sort_values(ascending=False).head(5)
         stds  = df.std().sort_values(ascending=False).head(5)
 
-        lines.append("Highest-mean features:")
-        lines.extend(tabulate(list(means.items()), headers=["feature", "mean"], tablefmt="github").splitlines())
-        lines.append("")
+        intro.append(f"{c.BOLD}Highest-mean features:{c.RESET}" if c.enabled else "Highest-mean features:")
+        intro.extend(tabulate(list(means.items()), headers=[f"{c.MAGENTA}feature{c.RESET}" if c.enabled else "feature", "mean"], tablefmt=TABLE_FMT).splitlines())
+        intro.append("")
 
-        lines.append("Most-variable features (by std):")
-        lines.extend(tabulate(list(stds.items()), headers=["feature", "std"], tablefmt="github").splitlines())
-        lines.append("")
+        intro.append(f"{c.BOLD}Most-variable features (by std):{c.RESET}" if c.enabled else "Most-variable features (by std):")
+        intro.extend(tabulate(list(stds.items()), headers=[f"{c.MAGENTA}feature{c.RESET}" if c.enabled else "feature", "std"], tablefmt=TABLE_FMT).splitlines())
+        intro.append("")
 
-        # example rows
-        lines.append("Example rows (first few timesteps):")
-        ex_tbl = tabulate(df.head(peek).round(6), headers="keys", tablefmt="github", showindex=True)
-        lines.extend(ex_tbl.splitlines())
+        intro.append(f"{c.BOLD}Example rows (first few timesteps):{c.RESET}" if c.enabled else "Example rows (first few timesteps):")
+        ex_tbl = tabulate(df.head(peek).round(6), headers="keys", tablefmt=TABLE_FMT, showindex=True)
+        intro.extend(ex_tbl.splitlines())
 
     except Exception as e:
-        lines.append(f"(Could not compute stats: {e})")
+        intro.append(f"{c.RED}(Could not compute stats: {e}){c.RESET}" if c.enabled else f"(Could not compute stats: {e})")
 
-    print(_render_card("Dataset summary", lines, c, style=style, align="left"))
+    print(_render_card("Dataset summary", intro, c, style=style, align="left"))
 
 
 # ================================== CLI ======================================
@@ -836,10 +816,15 @@ def _main_cli():
     parser.add_argument("--every", type=int, default=1)
     parser.add_argument("--clip-quantiles", type=float, nargs=2, metavar=("QMIN", "QMAX"), default=None)
     parser.add_argument("--style", choices=["chat", "box"], default="chat", help="Output style")
+    parser.add_argument("--table-style", choices=["github","grid","simple"], default="github", help="Tabulate table style")
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors in output")
     parser.add_argument("--verbose", action="store_true", help="Print extra diagnostics (memory, scaler, clip bounds)")
     parser.add_argument("--meta-json", type=str, default=None, help="Optional path to dump meta JSON")
     args = parser.parse_args()
+
+    # set global table format
+    global TABLE_FMT
+    TABLE_FMT = args.table_style
 
     c = _C(_supports_color(args.no_color))
     _print_dir_listing(args.data_dir, c, style=args.style)
@@ -864,7 +849,7 @@ def _main_cli():
     )
 
     if args.summary:
-        lines = loader.summarize(peek=args.peek)
+        lines = loader.summarize(peek=args.peek, c=c)
         _print_summary(lines, c, style=args.style)
         _print_dataset_info(loader, c, style=args.style, peek=args.peek)
         return
