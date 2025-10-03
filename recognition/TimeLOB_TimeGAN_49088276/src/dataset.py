@@ -8,7 +8,8 @@ LOBSTER (Level-10) preprocessing for TimeGAN.
 
 Inputs (per trading session):
   message_10.csv, orderbook_10.csv
-    - If headers are missing, pass --headerless-message / --headerless-orderbook (CLI).
+    - If headers are missing, pass --headerless-message / --headerless-orderbook (CLI),
+      but auto-detection now assigns canonical headers when omitted.
 
 Outputs:
   train, val, test  — NumPy arrays with shape [num_seq, seq_len, num_features]
@@ -27,10 +28,11 @@ Feature sets:
 
 Notes:
 - Scaling is fit on TRAIN only (Standard/MinMax/None). Advanced scalers: Robust, Quantile, Power.
-- Optional whitening: PCA (with variance threshold) or ZCA.
+- Optional whitening: PCA (variance threshold) or ZCA.
 - Optional train-only sequence augmentations (jitter, scaling, time-warp) for GANs.
 - Windows default to non-overlapping (stride=seq_len); set stride<seq_len for overlap.
-- If your CSV headers use camel-case (e.g., AskPrice1), they’re auto-normalized.
+- CamelCase headers (e.g., AskPrice1) auto-normalize.
+- Headerless CSVs are auto-detected and canonical headers applied.
 
 Created by: Radhesh Goel (Keys-I) | ID: s49088276
 """
@@ -164,6 +166,13 @@ class LOBSTERData:
             ob_df = ob_df.iloc[order].reset_index(drop=True)
 
         self._check_alignment(msg_df, ob_df)
+
+        # enforce numeric types early (prevents string pollution)
+        for col in ("time", "order_id", "size", "price"):
+            if col in msg_df.columns:
+                msg_df[col] = pd.to_numeric(msg_df[col], errors="coerce")
+        ob_df[ob_df.columns] = ob_df[ob_df.columns].apply(pd.to_numeric, errors="coerce")
+
         feats = self._build_features(ob_df)
 
         if self.every > 1:
@@ -269,6 +278,52 @@ class LOBSTERData:
         if any(x < 0 for x in self.splits):
             raise ValueError("splits cannot be negative")
 
+    # ---- header detection helpers ----
+    def _looks_headerless(self, path: str, expected_cols: int, min_numeric: int) -> bool:
+        """
+        Peek the first row with header=None. If the row is mostly numeric and the
+        column count matches what we expect, assume there's NO header.
+        """
+        try:
+            df0 = pd.read_csv(path, header=None, nrows=1)
+        except Exception:
+            return False
+        if df0.shape[1] != expected_cols:
+            return False
+        num_ok = pd.to_numeric(df0.iloc[0], errors="coerce").notna().sum()
+        return num_ok >= min_numeric
+
+    def _read_with_possible_headerless(self, path: str, default_names: list[str],
+                                       force_headerless: bool,
+                                       normalize_fn=None) -> pd.DataFrame:
+        """
+        Read CSV, auto-detect headerlessness if not forced.
+        - If forced: header=None, names=default_names
+        - Else: if first row looks numeric & count matches, treat as headerless.
+                otherwise try header=0 and optionally normalize columns.
+        """
+        expected_cols = len(default_names)
+        if force_headerless:
+            return pd.read_csv(path, header=None, names=default_names)
+
+        # Auto-detect headerless
+        if self._looks_headerless(path, expected_cols=expected_cols,
+                                  min_numeric=max(4, int(0.6 * expected_cols))):  # threshold 60%
+            return pd.read_csv(path, header=None, names=default_names)
+
+        # Try with header row, then normalize if asked
+        df = pd.read_csv(path)
+        if normalize_fn is not None:
+            df = normalize_fn(df, default_names)
+
+        # If counts match but names/order differ, force canonical order & names
+        if df.shape[1] == expected_cols and list(df.columns) != default_names:
+            df = df.iloc[:, :expected_cols]  # ensure width
+            df.columns = [str(c) for c in df.columns]
+            # If normalize_fn was provided, it likely already tried to normalize.
+            df.columns = default_names
+        return df
+
     def _load_csvs(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         if not os.path.isfile(self.orderbook_path):
             raise FileNotFoundError(f"Missing {self.orderbook_path}")
@@ -277,13 +332,21 @@ class LOBSTERData:
 
         # Message (6 columns)
         msg_cols = ["time", "type", "order_id", "size", "price", "direction"]
-        if self.headerless_message:
-            msg_df = pd.read_csv(self.message_path, header=None, names=msg_cols)
-        else:
-            msg_df = pd.read_csv(self.message_path)
-            msg_df.columns = [str(c).strip().lower().replace(" ", "_") for c in msg_df.columns]
-            if len(msg_df.columns) == 6 and set(msg_df.columns) != set(msg_cols):
-                msg_df.columns = msg_cols
+        msg_df = self._read_with_possible_headerless(
+            self.message_path,
+            default_names=msg_cols,
+            force_headerless=self.headerless_message,
+            normalize_fn=lambda df, _: (
+                df.assign(**{}).rename(columns=lambda c: str(c).strip().lower().replace(" ", "_"))
+            )
+        )
+        # Enforce exact column order when shape matches but order differs
+        if msg_df.shape[1] == 6 and list(msg_df.columns) != msg_cols:
+            # Try reorder if all present; else force names in canonical order
+            present = set(msg_df.columns)
+            if set(msg_cols).issubset(present):
+                msg_df = msg_df[msg_cols]
+            msg_df.columns = msg_cols
 
         # Orderbook (40 columns)
         ob_cols = (
@@ -292,11 +355,17 @@ class LOBSTERData:
             [f"bid_price_{i}" for i in range(1, 11)] +
             [f"bid_size_{i}"  for i in range(1, 11)]
         )
-        if self.headerless_orderbook:
-            ob_df = pd.read_csv(self.orderbook_path, header=None, names=ob_cols)
-        else:
-            ob_df = pd.read_csv(self.orderbook_path)
-            ob_df = self._normalize_orderbook_headers(ob_df, ob_cols)
+        ob_df = self._read_with_possible_headerless(
+            self.orderbook_path,
+            default_names=ob_cols,
+            force_headerless=self.headerless_orderbook,
+            normalize_fn=lambda df, target: self._normalize_orderbook_headers(df, target)
+        )
+        # Enforce exact column order when counts match but order differs
+        if ob_df.shape[1] == len(ob_cols) and list(ob_df.columns) != ob_cols:
+            if set(ob_cols).issubset(set(ob_df.columns)):
+                ob_df = ob_df[ob_cols]
+            ob_df.columns = ob_cols
 
         return msg_df, ob_df
 
@@ -657,7 +726,6 @@ if __name__ == "__main__":
             return headers, rows
 
         def _subpanel_lines(title: str, body_lines: list[str]) -> list[str]:
-            # Render a mini panel and return its lines to embed inside the big panel
             return render_card(title, body_lines, c, style=args.style, align="left").splitlines()
 
         def _panel_df(title: str, df: pd.DataFrame, peek: int) -> list[str]:
@@ -683,7 +751,6 @@ if __name__ == "__main__":
             return _subpanel_lines("describe (numeric subset)", tx_table(rows, headers, c))
 
         def _big_panel(title: str, subpanels: list[list[str]]) -> str:
-            # Flatten the subpanel line blocks with a blank spacer between them
             body_lines: list[str] = []
             for i, block in enumerate(subpanels):
                 if i > 0:
