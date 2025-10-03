@@ -35,6 +35,7 @@ Created by: Radhesh Goel (Keys-I) | ID: s49088276
 from __future__ import annotations
 
 import os
+import re
 import argparse
 import shutil
 from datetime import datetime
@@ -43,6 +44,7 @@ from typing import Tuple, List, Literal, Optional, Dict
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from tabulate import tabulate
 
 
 # ============================== Pretty printing ===============================
@@ -89,31 +91,66 @@ def _wrap(s: str, width: int) -> list[str]:
         out.append(cur)
     return out
 
+# ---- detect and preserve tabulate tables inside panels/bubbles ----
+
+_ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+def _visible_len(s: str) -> int:
+    """Visible length without ANSI codes (so width calc matches terminal)."""
+    return len(_ANSI_RE.sub("", s))
+
+def _is_table_line(s: str) -> bool:
+    """
+    Heuristic for tabulate-like lines we should not wrap:
+    - GitHub style: lines starting with '|' and having columns separated by '|'
+    - Grid style: rule lines with '+' borders
+    - Simple header/rule lines made of '-:|+ '
+    """
+    t = s.strip()
+    if not t:
+        return False
+    if t.startswith("|") and "|" in t[1:]:
+        return True
+    if t.startswith("+") and t.endswith("+"):
+        return True
+    if set(t) <= set("-:|+ "):
+        return True
+    return False
+
 def _kv_table(rows: list[tuple[str, str]], width: int, pad: int = 2) -> list[str]:
-    """Render aligned key: value lines as a compact message table."""
+    """
+    Render key–value rows as a compact 2-col table using tabulate.
+    Returns a list of lines to embed inside bubbles/boxes.
+    """
     if not rows:
         return []
-    key_w = min(max(len(k) for k,_ in rows), max(12, int(0.35*width)))
-    val_w = max(8, width - key_w - pad)
-    lines: list[str] = []
-    for k, v in rows:
-        k = (k[:key_w-1] + "…") if len(k) > key_w else k
-        wrapped = _wrap(v, val_w)
-        lines.append(f"{k.ljust(key_w)}: {wrapped[0]}")
-        for cont in wrapped[1:]:
-            lines.append(f"{' '*key_w}  {cont}")
-    return lines
+    table = tabulate(rows, headers=["key", "value"], tablefmt="github", stralign="left")
+    return table.splitlines()
 
 def _bubble(title: str, body_lines: list[str], c: _C, align: str = "left", width: int | None = None) -> str:
     """
     Render a chat-style message bubble.
-    align: 'left' (incoming) or 'right' (outgoing)
+    - Does NOT wrap lines that look like preformatted tables.
+    - Auto-fits inner width to the widest table line (within terminal limit).
     """
-    width = min(_term_width(), width or _term_width())
-    max_inner = max(24, width - 10)           # inner text width
+    termw = _term_width()
+    width = min(termw, width or termw)
+
+    # Baseline inner width
+    base_inner = max(24, width - 10)
+
+    # If there are preformatted table lines, fit to the widest visible line
+    widest_tbl = 0
+    for ln in body_lines:
+        if _is_table_line(ln):
+            widest_tbl = max(widest_tbl, _visible_len(ln))
+    max_inner = min(max(base_inner, widest_tbl), width - 10)
+
+    # Left/right alignment
     indent = 2 if align == "left" else max(2, width - (max_inner + 8))
     pad = " " * indent
 
+    # Header
     ts = datetime.now().strftime("%H:%M")
     head = f"{c.BOLD}{title}{c.RESET}  {c.DIM}{ts}{c.RESET}"
     head_lines = _wrap(head, max_inner)
@@ -121,29 +158,64 @@ def _bubble(title: str, body_lines: list[str], c: _C, align: str = "left", width
     for hl in head_lines[1:]:
         lines.append(pad + " " + hl)
 
-    # bubble
+    # Bubble top border
     lines.append(pad + "  " + ("╭" + "─" * (max_inner + 2) + "╮"))
+
+    # Body: keep table lines intact; wrap normal text
     for ln in body_lines:
-        for wln in _wrap(ln, max_inner):
-            lines.append(pad + "  " + "│ " + wln.ljust(max_inner) + " │")
+        if _is_table_line(ln):
+            vis = _visible_len(ln)
+            if vis <= max_inner:
+                out = ln + " " * (max_inner - vis)
+            else:
+                out = ln[:max_inner]
+            lines.append(pad + "  " + "│ " + out + " │")
+        else:
+            for wln in _wrap(ln, max_inner):
+                lines.append(pad + "  " + "│ " + wln.ljust(max_inner) + " │")
+
+    # Bubble bottom + tail
     tail_left  = pad + "  " + "╰" + "─" * (max_inner + 2) + "╯" + "⟋"
     tail_right = pad + " "  + "⟍" + "╰" + "─" * (max_inner + 2) + "╯"
     lines.append(tail_left if align == "left" else tail_right)
     return "\n".join(lines)
 
 def _panel(title: str, body_lines: list[str], c: _C, width: int | None = None) -> str:
-    """Box panel fallback (non-chat style)."""
-    width = width or _term_width()
+    """Box panel; does not wrap tabulated lines; auto-fits to widest table row."""
+    termw = _term_width()
+    width = width or termw
+    inner = width - 4  # borders + spaces
+
+    # Fit inner width to widest table line if present (within terminal width)
+    widest_tbl = 0
+    for ln in body_lines:
+        if _is_table_line(ln):
+            widest_tbl = max(widest_tbl, _visible_len(ln))
+    inner = min(max(inner, widest_tbl), termw - 4)
+    width = inner + 4
+
     border = "─" * (width - 2)
     out = [f"{c.CYAN}┌{border}┐{c.RESET}"]
     title_line = f" {title} "
     pad = max(0, width - 2 - len(title_line))
     out.append(f"{c.CYAN}│{c.RESET}{c.BOLD}{title_line}{c.RESET}{' '*pad}{c.CYAN}│{c.RESET}")
     out.append(f"{c.CYAN}├{border}┤{c.RESET}")
+
     for ln in body_lines:
-        for sub in _wrap(ln, width - 4):
-            pad = max(0, width - 4 - len(sub))
-            out.append(f"{c.CYAN}│{c.RESET} {sub}{' '*pad} {c.CYAN}│{c.RESET}")
+        if _is_table_line(ln):
+            vis = _visible_len(ln)
+            # inner-2 for side spaces inside the box content
+            width_ok = inner - 2
+            if vis <= width_ok:
+                body = ln + " " * (width_ok - vis)
+            else:
+                body = ln[:width_ok]
+            out.append(f"{c.CYAN}│{c.RESET} {body} {c.CYAN}│{c.RESET}")
+        else:
+            for sub in _wrap(ln, inner - 2):
+                padlen = max(0, (inner - 2) - len(sub))
+                out.append(f"{c.CYAN}│{c.RESET} {sub}{' '*padlen} {c.CYAN}│{c.RESET}")
+
     out.append(f"{c.CYAN}└{border}┘{c.RESET}")
     return "\n".join(out)
 
@@ -201,20 +273,24 @@ def _summarize_df(df: pd.DataFrame, name: str, peek: int = 5) -> List[str]:
                 lines.append(f"time monotonic nondecreasing: {is_mono}")
         except Exception:
             pass
+
+    # numeric quick stats (pretty table)
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if num_cols:
-        sample_cols = num_cols[:6]
-        desc = df[sample_cols].describe().to_dict()
-        desc = {k: {m: float(v) for m, v in stats.items()} for k, stats in desc.items()}
+        sample_cols = num_cols[: min(8, len(num_cols))]
+        desc_df = df[sample_cols].describe().round(6)
         lines.append("describe(sample numeric cols):")
-        for k, stats in desc.items():
-            stats_str = ", ".join([f"{m}={val:.4g}" for m, val in stats.items()])
-            lines.append(f"  {k}: {stats_str}")
+        lines.extend(tabulate(desc_df, headers="keys", tablefmt="github").splitlines())
+
+    # head / tail (pretty tables)
     if peek > 0:
         lines.append("head:")
-        lines.append(df.head(peek).to_string(index=False))
+        head_tbl = tabulate(df.head(peek), headers="keys", tablefmt="github", showindex=False)
+        lines.extend(head_tbl.splitlines())
         lines.append("tail:")
-        lines.append(df.tail(peek).to_string(index=False))
+        tail_tbl = tabulate(df.tail(peek), headers="keys", tablefmt="github", showindex=False)
+        lines.extend(tail_tbl.splitlines())
+
     return lines
 
 
@@ -546,10 +622,10 @@ def _print_summary(lines: list[str], c: _C, style: str) -> None:
 
     t1, b1 = split_title(msg_part)
     if t1:
-        print(_render_card(f"🟣 {t1}", b1, c, style=style, align="left"))
+        print(_render_card(f"{t1}", b1, c, style=style, align="left"))
     t2, b2 = split_title(ob_part)
     if t2:
-        print(_render_card(f"🟢 {t2}", b2, c, style=style, align="left"))
+        print(_render_card(f"{t2}", b2, c, style=style, align="left"))
 
 def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
                   verbose: bool = False,
@@ -662,6 +738,81 @@ def _print_report(W_train, W_val, W_test, meta: dict, c: _C, style: str, *,
     print(_render_card("Windowing details", perf, c, style=style, align="right"))
 
 
+# ========================== Dataset info (report card) ========================
+
+def _print_dataset_info(loader: "LOBSTERData", c: _C, style: str, peek: int = 5) -> None:
+    """Print detailed information about the dataset and feature set."""
+    meta = loader.get_meta()
+    feature_set = meta.get("feature_set")
+    feats = meta.get("feature_names") or []
+
+    # Fallback feature names if meta is empty
+    if not feats:
+        if feature_set == "core":
+            feats = [
+                "mid_price",
+                "spread",
+                "mid_log_return",
+                "queue_imbalance_l1",
+                "depth_imbalance_l10",
+            ]
+        elif feature_set == "raw10":
+            feats = (
+                [f"ask_price_{i}" for i in range(1, 11)] +
+                [f"ask_size_{i}"  for i in range(1, 11)] +
+                [f"bid_price_{i}" for i in range(1, 11)] +
+                [f"bid_size_{i}"  for i in range(1, 11)]
+            )
+
+    lines: List[str] = [
+        f"Feature set: {feature_set}",
+        f"Total features: {len(feats)}",
+        ""
+    ]
+
+    # aggregated statistics across splits (pretty tables)
+    try:
+        W_train, W_val, W_test = loader.load_arrays()
+        if W_train.size + W_val.size + W_test.size == 0:
+            raise ValueError("No windows produced; consider lowering seq_len or stride.")
+        blocks = []
+        for W in (W_train, W_val, W_test):
+            if getattr(W, "size", 0):
+                blocks.append(W.reshape(-1, W.shape[-1]))
+        all_data = np.concatenate(blocks, axis=0)
+        df = pd.DataFrame(all_data, columns=feats)
+
+        # describe()
+        lines.append("Statistical summary (aggregated across splits):")
+        desc_df = df.describe().round(6)
+        lines.extend(tabulate(desc_df, headers="keys", tablefmt="github").splitlines())
+        lines.append("")
+
+        # peaks: means and stds tables
+        means = df.mean().sort_values(ascending=False).head(5)
+        stds  = df.std().sort_values(ascending=False).head(5)
+
+        lines.append("Highest-mean features:")
+        lines.extend(tabulate(list(means.items()), headers=["feature", "mean"], tablefmt="github").splitlines())
+        lines.append("")
+
+        lines.append("Most-variable features (by std):")
+        lines.extend(tabulate(list(stds.items()), headers=["feature", "std"], tablefmt="github").splitlines())
+        lines.append("")
+
+        # example rows
+        lines.append("Example rows (first few timesteps):")
+        ex_tbl = tabulate(df.head(peek).round(6), headers="keys", tablefmt="github", showindex=True)
+        lines.extend(ex_tbl.splitlines())
+
+    except Exception as e:
+        lines.append(f"(Could not compute stats: {e})")
+
+    print(_render_card("Dataset summary", lines, c, style=style, align="left"))
+
+
+# ================================== CLI ======================================
+
 def _main_cli():
     parser = argparse.ArgumentParser(description="LOBSTERData (preprocess + summarize).")
     parser.add_argument("--data-dir", default="data")
@@ -715,6 +866,7 @@ def _main_cli():
     if args.summary:
         lines = loader.summarize(peek=args.peek)
         _print_summary(lines, c, style=args.style)
+        _print_dataset_info(loader, c, style=args.style, peek=args.peek)
         return
 
     W_train, W_val, W_test = loader.load_arrays()
