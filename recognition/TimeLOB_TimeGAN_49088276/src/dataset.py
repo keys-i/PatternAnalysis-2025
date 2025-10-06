@@ -64,9 +64,9 @@ class DatasetConfig:
     """
     seq_len: int
     data_dir: Path = field(default_factory=lambda: Path(DATA_DIR))
-    filename: str = ORDERBOOK_FILENAME
+    orderbook_filename: str = ORDERBOOK_FILENAME
     splits: Tuple[float, float, float] = TRAIN_TEST_SPLIT
-    shuffle: bool = True
+    shuffle_windows: bool = True
     dtype: type = np.float32
     filter_zero_rows: bool = True
 
@@ -75,8 +75,8 @@ class DatasetConfig:
         return cls(
             seq_len=getattr(arg, "seq_len", 128),
             data_dir=Path(getattr(arg, "data_dir", DATA_DIR)),
-            filename=getattr(arg, "filename", ORDERBOOK_FILENAME),
-            shuffle=getattr(arg, "shuffle", True),
+            orderbook_filename=getattr(arg, "orderbook_filename", ORDERBOOK_FILENAME),
+            shuffle_windows=getattr(arg, "shuffle_windows", True),
             dtype=getattr(arg, "dtype", np.float32),
             filter_zero_rows=getattr(arg, "filter_zero_rows", True),
         )
@@ -119,7 +119,7 @@ class LOBDataset:
         Window the selected split into shape (num_windows, seq_len, num_features).
         """
         data = self._select_split(split)
-        return self._windowize(data, self.cfg.seq_len, self.cfg.shuffle)
+        return self._windowize(data, self.cfg.seq_len, self.cfg.shuffle_windows)
 
     def dataset_windowed(
             self
@@ -133,7 +133,7 @@ class LOBDataset:
         return train_w, val_w, test_w
 
     def _read_raw(self) -> NDArray[np.int64]:
-        path = Path(self.cfg.data_dir, self.cfg.filename)
+        path = Path(self.cfg.data_dir, self.cfg.orderbook_filename)
         if not path.exists():
             msg = (
                 f"{path} not found.\n"
@@ -166,6 +166,7 @@ class LOBDataset:
         self._train = self._filtered[:t_cutoff]
         self._val = self._filtered[t_cutoff:v_cutoff]
         self._test = self._filtered[v_cutoff:]
+
         assert all(
             len(d) > 5 for d in (self._train, self._val, self._test)
         ), "Each split must have at least 5 windows."
@@ -186,7 +187,7 @@ class LOBDataset:
             self,
             data: NDArray[np.float32],
             seq_len: int,
-            shuffle: bool
+            shuffle_windows: bool
     ) -> NDArray[np.float32]:
         n_samples, n_features = data.shape
         n_windows = n_samples - seq_len + 1
@@ -196,7 +197,7 @@ class LOBDataset:
         out = np.empty((n_windows, seq_len, n_features), dtype=self.cfg.dtype)
         for i in range(n_windows):
             out[i] = data[i: i + seq_len]
-        if shuffle:
+        if shuffle_windows:
             np.random.shuffle(out)
         return out
 
@@ -217,13 +218,13 @@ def batch_generator(
     if `time` is None, uses a constant length equal to data.shape[1] (seq_len).
     """
     n = len(data)
-    idx = np.random.randint(n)[:batch_size]
+    idx = np.random.choice(n, size=batch_size, replace=True)
     data_mb = data[idx].astype(np.float32)
     if time is not None:
-        T_mb = np.full((batch_size,), data_mb.shape[1], dtype=np.int32)
+        t_mb = np.full((batch_size,), data_mb.shape[1], dtype=np.int32)
     else:
-        T_mb = time[idx].astype(np.int32)
-    return data_mb, T_mb
+        t_mb = time[idx].astype(np.int32)
+    return data_mb, t_mb
 
 
 def load_data(arg: Namespace) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
