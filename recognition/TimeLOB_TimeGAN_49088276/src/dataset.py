@@ -13,221 +13,228 @@ Created By: Radhesh Goel (Keys-I)
 """
 from __future__ import annotations
 
-import json
-import os
+from argparse import Namespace
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Tuple
+from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
-import pandas as pd
+from numpy.typing import NDArray
 
-ASK_PRICE_COLS = [f"ask_price_{i}" for i in range(1, 11)]
-ASK_SIZE_COLS = [f"ask_size_{i}" for i in range(1, 11)]
-BID_PRICE_COLS = [f"bid_price_{i}" for i in range(1, 11)]
-BID_SIZE_COLS = [f"bid_size_{i}" for i in range(1, 11)]
-ORDERBOOK_COLUMNS = ASK_PRICE_COLS + ASK_SIZE_COLS + BID_PRICE_COLS + BID_SIZE_COLS
+from src.helpers.constants import DATA_DIR, ORDERBOOK_FILENAME, TRAIN_TEST_SPLIT
 
 
-@dataclass
-class ContinuousMinMaxScaler:
+class MinMaxScaler:
     """
-    Simple min-max scaler that keeps track of per-feature extrema and supports
-    repeated transforms without relying on sklearn.
+    Feature-wise min–max scaler with a scikit-learn-like API.
     """
-    feature_range: Tuple[float, float] = (0.0, 1.0)
-    eps: float = 1e-9
-    data_min_: Optional[np.ndarray] = field(default=None, init=False)
-    data_max_: Optional[np.ndarray] = field(default=None, init=False)
 
-    def fit(self, data: np.ndarray) -> "ContinuousMinMaxScaler":
-        arr = np.asarray(data, dtype=np.float64)
-        self.data_min_ = arr.min(axis=0)
-        self.data_max_ = arr.max(axis=0)
+    def __init__(self, epsilon: float = 1e-7):
+        self.epsilon = epsilon
+        self._min: Optional[NDArray[np.floating]] = None
+        self._max: Optional[NDArray[np.floating]] = None
+
+    def fit(self, data: NDArray[np.floating]) -> "MinMaxScaler":
+        self._min = np.min(data, axis=0)
+        self._max = np.max(data, axis=0)
         return self
 
-    def transform(self, data: np.ndarray) -> np.ndarray:
-        if self.data_min_ is None or self.data_max_ is None:
-            raise RuntimeError("Scaler not fitted.")
-        arr = np.asarray(data, dtype=np.float64)
-        denom = np.maximum(self.data_max_ - self.data_min_, self.eps)
-        scaled = (arr - self.data_min_) / denom
-        lo, hi = self.feature_range
-        return (scaled * (hi - lo) + lo).astype(arr.dtype, copy=False)
+    def transform(
+            self, data: NDArray[np.floating]
+    ) -> NDArray[np.floating]:
+        if self._min is None or self._max is None:
+            raise RuntimeError("Scaler must be fitted before transform.")
+        numerator = data - self._min
+        denominator = (self._max - self._min) + self.epsilon
+        return numerator / denominator
 
-    def fit_transform(self, data: np.ndarray) -> np.ndarray:
+    def fit_transform(self, data: NDArray[np.floating]) -> NDArray[np.floating]:
         return self.fit(data).transform(data)
 
-    def inverse_transform(self, data: np.ndarray) -> np.ndarray:
-        if self.data_min_ is None or self.data_max_ is None:
-            raise RuntimeError("Scaler not fitted.")
-        lo, hi = self.feature_range
-        arr = np.asarray(data, dtype=np.float64)
-        base = (arr - lo) / (hi - lo + self.eps)
-        return base * (self.data_max_ - self.data_min_) + self.data_min_
+    def inverse_transform(self, data: NDArray[np.floating]) -> NDArray[np.floating]:
+        if self._min is None or self._max is None:
+            raise RuntimeError("Scaler must be fitted before inverse_transform.")
+        return data * ((self._max - self._min) + self.epsilon) + self._min
 
 
-class LOBSTERData:
+@dataclass(frozen=True)
+class DatasetConfig:
     """
-    Minimal LOBSTER loader (orderbook only) with continuous min-max scaling.
+    Configuration for loading and preprocessing order-book data.
+    """
+    seq_len: int
+    data_dir: Path = field(default_factory=lambda: Path(DATA_DIR))
+    filename: str = ORDERBOOK_FILENAME
+    splits: Tuple[float, float, float] = TRAIN_TEST_SPLIT
+    shuffle: bool = True
+    dtype: type = np.float32
+    filter_zero_rows: bool = True
 
-    Parameters
-    ----------
-    data_dir : str
-        Folder containing orderbook_10.csv (and optionally message_10.csv).
-    feature_set : {"core", "raw10"}
-        Representation to build.
-    seq_len : int
-        Window length fed to TimeGAN.
-    stride : int, optional
-        Step between consecutive windows (defaults to seq_len for non-overlap).
-    splits : tuple
-        Train/val/test fractions; must sum to 1.0.
+    @classmethod
+    def from_namespace(cls, arg: Namespace) -> "DatasetConfig":
+        return cls(
+            seq_len=getattr(arg, "seq_len", 128),
+            data_dir=Path(getattr(arg, "data_dir", DATA_DIR)),
+            filename=getattr(arg, "filename", ORDERBOOK_FILENAME),
+            shuffle=getattr(arg, "shuffle", True),
+            dtype=getattr(arg, "dtype", np.float32),
+            filter_zero_rows=getattr(arg, "filter_zero_rows", True),
+        )
+
+
+class LOBDataset:
+    """
+    End-to-end loader for a single LOBSTER orderbook file
     """
 
     def __init__(
-        self,
-        data_dir: str,
-        message_file: str = "message_10.csv",  # kept for compatibility; unused
-        orderbook_file: str = "orderbook_10.csv",
-        feature_set: Literal["core", "raw10"] = "core",
-        seq_len: int = 128,
-        stride: Optional[int] = None,
-        splits: Tuple[float, float, float] = (0.7, 0.15, 0.15),
-        feature_range: Tuple[float, float] = (0.0, 1.0),
-        dtype: Literal["float32", "float64"] = "float32",
-        save_dir: Optional[str] = None,
+            self, cfg: DatasetConfig,
+            scaler: Optional[MinMaxScaler] = None
     ):
-        self.data_dir = data_dir
-        self.message_file = message_file  # placeholder for potential alignment checks
-        self.orderbook_path = os.path.join(data_dir, orderbook_file)
-        self.feature_set = feature_set
-        self.seq_len = int(seq_len)
-        self.stride = int(stride) if stride is not None else self.seq_len
-        self.splits = splits
-        self.scaler = ContinuousMinMaxScaler(feature_range=feature_range)
-        self._dtype_name = dtype
-        self.dtype = np.float32 if dtype == "float32" else np.float64
-        self.save_dir = save_dir
-        self.eps = 1e-8
-        self._validate_inputs()
+        self.cfg = cfg
+        self.scaler = scaler or MinMaxScaler()
 
-    # ------------------- public API -------------------
+        self._raw: Optional[NDArray[np.int64]] = None
+        self._filtered: Optional[NDArray[np.floating]] = None
+        self._train: Optional[NDArray[np.floating]] = None
+        self._val: Optional[NDArray[np.floating]] = None
+        self._test: Optional[NDArray[np.floating]] = None
 
-    def load_arrays(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        orderbook = self._load_orderbook()
-        features = self._build_features(orderbook)
-        features = features[~np.isnan(features).any(axis=1)]
-        train, val, test = self._split(features)
+    def load(self) -> "LOBDataset":
+        print("Loading and preprocessing LOBSTER orderbook dataset...")
+        data = self._read_raw()
+        data = self._filter_unoccupied(data) if self.cfg.filter_zero_rows else data.astype(self.cfg.dtype)
+        self._filtered = data.astype(self.cfg.dtype)
 
-        self.scaler.fit(train)
-        train = self.scaler.transform(train)
-        val = self.scaler.transform(val)
-        test = self.scaler.transform(test)
+        self._split_chronological()
+        self._scale_train_only()
+        print("Dataset loaded, split, and scaled.")
+        return self
 
-        W_train = self._windowize(train)
-        W_val = self._windowize(val)
-        W_test = self._windowize(test)
+    def make_windows(
+            self,
+            split: str = "train"
+    ) -> NDArray[np.float32]:
+        """
+        Window the selected split into shape (num_windows, seq_len, num_features).
+        """
+        data = self._select_split(split)
+        return self._windowize(data, self.cfg.seq_len, self.cfg.shuffle)
 
-        if self.save_dir:
-            os.makedirs(self.save_dir, exist_ok=True)
-            np.savez_compressed(
-                os.path.join(self.save_dir, "windows.npz"),
-                train=W_train, val=W_val, test=W_test
+    def dataset_windowed(
+            self
+    ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+        """
+            Return (train_w, val_w, test_w) as windowed arrays.
+        """
+        train_w = self.make_windows(split="train")
+        val_w = self.make_windows(split="val")
+        test_w = self.make_windows(split="test")
+        return train_w, val_w, test_w
+
+    def _read_raw(self) -> NDArray[np.int64]:
+        path = Path(self.cfg.data_dir, self.cfg.filename)
+        if not path.exists():
+            msg = (
+                f"{path} not found.\n"
+                "Download AMZN level-10 sample from:\n"
+                "https://lobsterdata.com/info/sample/LOBSTER_SampleFile_AMZN_2012-06-21_10.zip\n"
+                "and place the '..._orderbook_10' file in the data directory."
             )
-            with open(os.path.join(self.save_dir, "meta.json"), "w", encoding="utf-8") as f:
-                json.dump(self.get_meta(), f, indent=2)
+            raise FileNotFoundError(msg)
+        print("Reading orderbook file...", path)
+        raw = np.loadtxt(path, delimiter=",", skiprows=0, dtype=np.int64)
+        print("Raw shape:", raw.shape)
+        self._raw = raw
+        return raw
 
-        return W_train, W_val, W_test
+    def _filter_unoccupied(self, data: NDArray[np.int64]) -> NDArray[np.float32]:
+        """
+        Remove rows containing zeros (dummy volumes) to avoid invalid states
+        """
+        mask = ~(data == 0).any(axis=1)
+        filtered = data[mask].astype(np.float32)
+        print("Filtered rows (no zeros). Shape", filtered.shape)
+        return filtered
 
-    def get_meta(self) -> dict:
-        return {
-            "feature_set": self.feature_set,
-            "seq_len": self.seq_len,
-            "stride": self.stride,
-            "splits": self.splits,
-            "feature_range": self.scaler.feature_range,
-            "dtype": self._dtype_name,
-        }
+    def _split_chronological(self) -> None:
+        assert self._filtered is not None, "Call load() first."
+        n = len(self._filtered)
+        t_frac, v_frac, _ = self.cfg.splits
+        t_cutoff = int(n * t_frac)
+        v_cutoff = int(n * v_frac)
+        self._train = self._filtered[:t_cutoff]
+        self._val = self._filtered[t_cutoff:v_cutoff]
+        self._test = self._filtered[v_cutoff:]
+        assert all(
+            len(d) > 5 for d in (self._train, self._val, self._test)
+        ), "Each split must have at least 5 windows."
+        print("Split sizes - train: %d, val: %d, test: %d", len(self._train), len(self._val), len(self._test))
 
-    # ------------------- helpers ---------------------
-
-    def _validate_inputs(self) -> None:
-        if not os.path.exists(self.orderbook_path):
-            raise FileNotFoundError(self.orderbook_path)
-        if self.seq_len <= 0 or self.stride <= 0:
-            raise ValueError("seq_len and stride must be positive.")
-        total = sum(self.splits)
-        if not np.isclose(total, 1.0):
-            raise ValueError(f"splits must sum to 1.0, got {self.splits} (sum={total}).")
-        if any(x <= 0 for x in self.splits):
-            raise ValueError("splits must be positive.")
-        lo, hi = self.scaler.feature_range
-        if hi <= lo:
-            raise ValueError("feature_range must satisfy min < max.")
-
-    def _load_orderbook(self) -> pd.DataFrame:
-        df = pd.read_csv(self.orderbook_path, header=None)
-        if df.shape[1] < len(ORDERBOOK_COLUMNS):
-            raise ValueError(f"Expected >= {len(ORDERBOOK_COLUMNS)} columns, found {df.shape[1]}.")
-        df = df.iloc[:, :len(ORDERBOOK_COLUMNS)]
-        numeric_ratio = pd.to_numeric(df.iloc[0], errors="coerce").notna().mean()
-        if numeric_ratio < 0.5:
-            df = df.iloc[1:].reset_index(drop=True)
-        df.columns = ORDERBOOK_COLUMNS
-        df = df.apply(pd.to_numeric, errors="coerce")
-        return df
-
-    def _build_features(self, ob_df: pd.DataFrame) -> np.ndarray:
-        data = ob_df.to_numpy(dtype=np.float64)
-        if self.feature_set == "raw10":
-            return data
-        ask_prices = data[:, :10]
-        ask_sizes = data[:, 10:20]
-        bid_prices = data[:, 20:30]
-        bid_sizes = data[:, 30:40]
-
-        mid_price = 0.5 * (ask_prices[:, 0] + bid_prices[:, 0])
-        spread = ask_prices[:, 0] - bid_prices[:, 0]
-        log_mid = np.log(np.clip(mid_price, self.eps, None))
-        mid_log_return = np.concatenate([[0.0], np.diff(log_mid)])
-        queue_imbalance = (
-            (bid_sizes[:, 0] - ask_sizes[:, 0]) /
-            (bid_sizes[:, 0] + ask_sizes[:, 0] + self.eps)
+    def _scale_train_only(self) -> None:
+        assert (
+                self._train is not None
+                and self._val is not None
+                and self._test is not None
         )
-        depth_imbalance = (
-            (bid_sizes.sum(axis=1) - ask_sizes.sum(axis=1)) /
-            (bid_sizes.sum(axis=1) + ask_sizes.sum(axis=1) + self.eps)
-        )
+        print("Fitting MinMaxScaler on train split.")
+        self._train = self.scaler.fit_transform(self._train)
+        self._val = self.scaler.transform(self._val)
+        self._test = self.scaler.transform(self._test)
 
-        feats = np.stack(
-            [mid_price, spread, mid_log_return, queue_imbalance, depth_imbalance],
-            axis=1,
-        )
-        return feats
+    def _windowize(
+            self,
+            data: NDArray[np.float32],
+            seq_len: int,
+            shuffle: bool
+    ) -> NDArray[np.float32]:
+        n_samples, n_features = data.shape
+        n_windows = n_samples - seq_len + 1
+        if n_windows <= 0:
+            raise ValueError(f"seq_len={seq_len} is too large for data of length {n_samples}.")
 
-    def _split(self, feats: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        n = len(feats)
-        n_train = int(n * self.splits[0])
-        n_val = int(n * self.splits[1])
-        n_test = n - n_train - n_val
-        if n_train < self.seq_len or n_val < self.seq_len or n_test < self.seq_len:
-            raise ValueError(
-                "Not enough rows for the requested seq_len/splits combination. "
-                f"Have {n} rows with splits {self.splits}."
-            )
-        train = feats[:n_train]
-        val = feats[n_train:n_train + n_val]
-        test = feats[n_train + n_val:]
-        return train, val, test
+        out = np.empty((n_windows, seq_len, n_features), dtype=self.cfg.dtype)
+        for i in range(n_windows):
+            out[i] = data[i: i + seq_len]
+        if shuffle:
+            np.random.shuffle(out)
+        return out
 
-    def _windowize(self, arr: np.ndarray) -> np.ndarray:
-        windows = []
-        limit = len(arr) - self.seq_len + 1
-        for start in range(0, limit, self.stride):
-            window = arr[start:start + self.seq_len]
-            if window.shape[0] == self.seq_len:
-                windows.append(window)
-        if not windows:
-            raise ValueError("Not enough rows to create even a single window.")
-        stacked = np.stack(windows).astype(self.dtype, copy=False)
-        return stacked
+    def _select_split(self, split: str) -> NDArray[np.float32]:
+        if split == "train": return self._train
+        if split == "val": return self._val
+        if split == "test": return self._test
+        raise ValueError("split must be 'train', 'val' or 'test'")
+
+
+def batch_generator(
+        data: NDArray[np.float32],
+        time: Optional[NDArray[np.float32]],
+        batch_size: int,
+):
+    """
+    Random mini-batch generator
+    if `time` is None, uses a constant length equal to data.shape[1] (seq_len).
+    """
+    n = len(data)
+    idx = np.random.randint(n)[:batch_size]
+    data_mb = data[idx].astype(np.float32)
+    if time is not None:
+        T_mb = np.full((batch_size,), data_mb.shape[1], dtype=np.int32)
+    else:
+        T_mb = time[idx].astype(np.int32)
+    return data_mb, T_mb
+
+
+def load_data(arg: Namespace) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+    """
+    Backwards-compatible wrapper.
+    """
+    cfg = DatasetConfig.from_namespace(arg)
+    loader = LOBDataset(cfg).load()
+    train_w = loader.make_windows("train")
+    val = loader._val
+    test = loader._test
+    print("Stock dataset has been loaded and preprocessed.")
+    return train_w, val, test
+
