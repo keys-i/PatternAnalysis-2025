@@ -3,7 +3,7 @@ Options for the entire model
 """
 from __future__ import annotations
 
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser, Namespace, REMAINDER
 from typing import Optional
 
 import numpy as np
@@ -67,3 +67,49 @@ class DataOptions:
         )
 
         return ns
+
+class Options:
+    """
+    Top-level options that *route* anything after `--dataset` to DatasetOptions.
+
+    Example:
+        opts = Options().parse()
+        ds = opts.dataset  # Namespace from DatasetOptions
+    """
+    def __init__(self) -> None:
+        parser = ArgumentParser(
+            prog="timeganlob",
+            description="TimeGAN-LOB entrypoint with nested dataset options."
+        )
+        parser.add_argument("--seed", type=int, default=42, help="Global random seed")
+        parser.add_argument("--run-name", type=str, default="exp1", help="Run name")
+
+        parser.add_argument(
+            "--dataset",
+            nargs=REMAINDER,
+            help=(
+                "All arguments following this flag are parsed by DatasetOptions. "
+                "Example: --dataset --seq-len 256 --no-shuffle"
+            ),
+        )
+        self._parser = parser
+
+    def parse(self, argv: Optional[list | str] = None) -> Namespace:
+        top = self._parser.parse_args(argv)
+
+        ds_argv = top.dataset if top.dataset is not None else []
+        dataset_ns = DataOptions().parse(ds_argv)
+
+        # attach nested namespace to the top-level namespace
+        out = Namespace(
+            seed=top.seed,
+            run_name=top.run_name,
+            dataset=dataset_ns,
+        )
+
+        return out
+
+if __name__ == "__main__":
+    opts = Options().parse()
+
+    print(opts)
