@@ -28,20 +28,20 @@ References:
 - 
 """
 from __future__ import annotations
-from pathlib import Path
-from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import math
-import numpy as np
-from numpy.typing import NDArray
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from numpy.typing import NDArray
 
 from src.dataset import batch_generator
-from src.helpers.args import Options
+from src.helpers.args import ModulesOptions as Options
 from src.helpers.constants import (
     WEIGHTS_DIR,
     OUTPUT_DIR,
@@ -135,6 +135,7 @@ class Generator(nn.Module):
     """
     Generator: random noise Z → latent sequence E.
     """
+
     def __init__(self, z_dim: int, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
         self.rnn = nn.GRU(
@@ -152,17 +153,19 @@ class Generator(nn.Module):
         g = self.proj(g)
         return self.act(g) if apply_sigmoid else g
 
+
 class Supervisor(nn.Module):
     """
     Supervisor: next-step latent supervision H_t → H_{t+1}.
     """
+
     def __init__(self, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
         self.rnn = nn.GRU(
-        input_size=hidden_dim,
-        hidden_size=hidden_dim,
-        num_layers=num_layers,
-        batch_first=True,
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
         )
         self.proj = nn.Linear(hidden_dim, hidden_dim)
         self.act = nn.Sigmoid()
@@ -176,13 +179,14 @@ class Supervisor(nn.Module):
 
 class Discriminator(nn.Module):
     """Discriminator: classify latent sequences (real vs synthetic)."""
+
     def __init__(self, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
         self.rnn = nn.GRU(
-        input_size=hidden_dim,
-        hidden_size=hidden_dim,
-        num_layers=num_layers,
-        batch_first=True,
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
         )
         # note: No sigmoid here; BCEWithLogitsLoss expects raw logits
         self.proj = nn.Linear(hidden_dim, 1)
@@ -193,6 +197,7 @@ class Discriminator(nn.Module):
         # produce a logit per timestep
         return self.proj(d)
 
+
 @dataclass
 class TimeGANHandles:
     encoder: Encoder
@@ -201,17 +206,19 @@ class TimeGANHandles:
     supervisor: Supervisor
     discriminator: Discriminator
 
+
 class TimeGAN:
     """
     End-to-end TimeGAN wrapper with training & generation utilities.
     """
+
     def __init__(
-        self,
-        opt: Options | object,
-        train_data: NDArray[np.float32],
-        val_data: NDArray[np.float32],
-        test_data: NDArray[np.float32],
-        load_weights: bool = False,
+            self,
+            opt: Options | object,
+            train_data: NDArray[np.float32],
+            val_data: NDArray[np.float32],
+            test_data: NDArray[np.float32],
+            load_weights: bool = False,
     ) -> None:
         # set seed & device
         set_seed(getattr(opt, "manualseed", None))
@@ -322,7 +329,6 @@ class TimeGAN:
         self.optS.step()
         return float(loss.detach().cpu())
 
-
     def _generator_step(self, x: torch.Tensor, z: torch.Tensor) -> float:
         # build graph
         h_real = self.netE(x)
@@ -347,7 +353,11 @@ class TimeGAN:
         sup = self.mse(s_real[:, :-1, :], h_real[:, 1:, :])
 
         loss = adv + self.opt.w_gamma * adv_e + self.opt.w_g * (v1 + v2) + torch.sqrt(sup + 1e-12)
-        self.optG.zero_grad(); self.optS.zero_grad(); loss.backward(); self.optG.step(); self.optS.step()
+        self.optG.zero_grad()
+        self.optS.zero_grad()
+        loss.backward()
+        self.optG.step()
+        self.optS.step()
         return float(loss.detach().cpu())
 
     def _discriminator_step(self, x: torch.Tensor, z: torch.Tensor) -> float:
@@ -359,9 +369,9 @@ class TimeGAN:
         y_fake = self.netD(h_hat)
         y_fake_e = self.netD(e_hat)
         loss = (
-            self.bce_logits(y_real, torch.ones_like(y_real))
-            + self.bce_logits(y_fake, torch.zeros_like(y_fake))
-            + self.opt.w_gamma * self.bce_logits(y_fake_e, torch.zeros_like(y_fake_e))
+                self.bce_logits(y_real, torch.ones_like(y_real))
+                + self.bce_logits(y_fake, torch.zeros_like(y_fake))
+                + self.opt.w_gamma * self.bce_logits(y_fake_e, torch.zeros_like(y_fake_e))
         )
         # optional hinge to avoid overshooting
         if loss.item() > 0.15:
@@ -373,12 +383,12 @@ class TimeGAN:
     def train_model(self) -> None:
         # phase 1: encoder-recovery pretrain
         for it in range(self.num_iterations):
-            x, _T = batch_generator(self.train_norm, None, self.batch_size) # T unused
+            x, _T = batch_generator(self.train_norm, None, self.batch_size)  # T unused
             x = torch.as_tensor(x, dtype=torch.float32)
             (x,) = self._to_device(x)
             er = self._pretrain_er_step(x)
             if (it + 1) % max(1, self.validate_interval // 2) == 0:
-                pass # keep output quiet by default
+                pass  # keep output quiet by default
 
         # phase 2: supervisor
         for it in range(self.num_iterations):
@@ -432,7 +442,13 @@ class TimeGAN:
 
         assert num_rows > 0
         windows_needed = math.ceil(num_rows / self.seq_len)
-        z = sample_noise(windows_needed, self.z_dim, self.seq_len)
+        z = sample_noise(
+            windows_needed,
+            self.z_dim,
+            self.seq_len,
+            mean=mean,
+            std=std,
+        )
         z = torch.as_tensor(z, dtype=torch.float32, device=self.device)
         e_hat = self.netG(z)
         h_hat = self.netS(e_hat)
