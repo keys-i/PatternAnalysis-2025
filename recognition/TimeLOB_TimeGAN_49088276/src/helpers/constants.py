@@ -3,7 +3,12 @@ Configuration constants for the project.
 """
 from math import isclose
 from typing import Literal
+
 OUTPUT_DIR = "outs"
+WEIGHTS_DIR = "weights"
+DATA_DIR = "data"
+
+ORDERBOOK_FILENAME = "AMZN_2012-06-21_34200000_57600000_orderbook_10.csv"
 
 # Training hyperparameters for TimeGAN
 NUM_TRAINING_ITERATIONS = 25_000
@@ -16,8 +21,3 @@ assert isclose(
 ), (
     f"TRAIN_TEST_SPLIT must sum to 1.0 (got {sum(TRAIN_TEST_SPLIT):.8f})"
 )
-
-DATA_DIR = "data"
-ORDERBOOK_FILENAME = "AMZN_2012-06-21_34200000_57600000_orderbook_10.csv"
-
-DATANAME = Literal["message", "orderbook"]
