@@ -21,3 +21,5 @@ assert isclose(
 ), (
     f"TRAIN_TEST_SPLIT must sum to 1.0 (got {sum(TRAIN_TEST_SPLIT):.8f})"
 )
+
+NUM_LEVELS = 10
