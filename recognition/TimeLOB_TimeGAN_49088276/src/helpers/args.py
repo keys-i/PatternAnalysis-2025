@@ -63,7 +63,7 @@ class DataOptions:
             splits=tuple(args.splits) if args.splits is not None else TRAIN_TEST_SPLIT,
             shuffle_windows=not args.no_shuffle,
             dtype=np.float32,
-            keep_zero_rows=not args.keep_zero_rows,
+            filter_zero_rows=not args.keep_zero_rows,
         )
 
         return ns
@@ -78,12 +78,13 @@ class ModulesOptions:
         mods.batch_size, mods.seq_len, mods.z_dim, mods.hidden_dim, mods.num_layer,
         mods.lr, mods.beta1, mods.w_gamma, mods.w_g
     """
+
     def __init__(self) -> None:
         parser = ArgumentParser(
             prog="timeganlob_modules",
             description="Module/model hyperparameters and training weights.",
         )
-        # Core shapes
+        # core shapes
         parser.add_argument("--batch-size", type=int, default=128)
         parser.add_argument("--seq-len", type=int, default=128,
                             help="Sequence length (kept here for convenience to sync with data).")
@@ -94,7 +95,7 @@ class ModulesOptions:
         parser.add_argument("--num-layer", type=int, default=3,
                             help="Number of stacked layers per RNN/TCN block.")
 
-        # Optimizer
+        # optimizer
         parser.add_argument("--lr", type=float, default=1e-4,
                             help="Learning rate (generator/supervisor/discriminator if shared).")
         parser.add_argument("--beta1", type=float, default=0.5,
@@ -111,8 +112,6 @@ class ModulesOptions:
     def parse(self, argv: Optional[list | str]) -> Namespace:
         m = self._parser.parse_args(argv)
 
-        # Provide both snake_case and "opt-like" names already as attributes
-        # (so downstream code can do opt.lr, opt.beta1, opt.w_gamma, opt.w_g).
         ns = Namespace(
             batch_size=m.batch_size,
             seq_len=m.seq_len,
@@ -150,6 +149,7 @@ class Options:
                 "Example: --dataset --seq-len 256 --no-shuffle"
             ),
         )
+
         parser.add_argument(
             "--modules",
             nargs=REMAINDER,
@@ -163,14 +163,20 @@ class Options:
     def parse(self, argv: Optional[list | str] = None) -> Namespace:
         top = self._parser.parse_args(argv)
 
+        # dataset namespace
         ds_argv = top.dataset if top.dataset is not None else []
         dataset_ns = DataOptions().parse(ds_argv)
+
+        # modules namespace
+        mod_argv = top.modules if top.modules is not None else []
+        modules_ns = ModulesOptions().parse(mod_argv)
 
         # attach nested namespace to the top-level namespace
         out = Namespace(
             seed=top.seed,
             run_name=top.run_name,
             dataset=dataset_ns,
+            modules=modules_ns,
         )
 
         return out
