@@ -4,7 +4,7 @@ Options for the entire model
 from __future__ import annotations
 
 from argparse import ArgumentParser, Namespace, REMAINDER
-from typing import Optional
+from typing import Optional, List
 
 import numpy as np
 
@@ -53,7 +53,7 @@ class DataOptions:
         )
         self._parser = parser
 
-    def parse(self, argv: Optional[list | str]) -> Namespace:
+    def parse(self, argv: Optional[List[str]]) -> Namespace:
         args = self._parser.parse_args(argv)
 
         ns = Namespace(
@@ -109,7 +109,7 @@ class ModulesOptions:
 
         self._parser = parser
 
-    def parse(self, argv: Optional[list | str]) -> Namespace:
+    def parse(self, argv: Optional[List[str]]) -> Namespace:
         m = self._parser.parse_args(argv)
 
         ns = Namespace(
@@ -160,7 +160,7 @@ class Options:
         )
         self._parser = parser
 
-    def parse(self, argv: Optional[list | str] = None) -> Namespace:
+    def parse(self, argv: Optional[List[str]] = None) -> Namespace:
         top = self._parser.parse_args(argv)
 
         # dataset namespace
@@ -183,5 +183,4 @@ class Options:
 
 if __name__ == "__main__":
     opts = Options().parse()
-
     print(opts)
