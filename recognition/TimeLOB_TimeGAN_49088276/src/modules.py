@@ -32,16 +32,16 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, runtime_checkable, Protocol, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from numpy.typing import NDArray
+from torch import Tensor
 
 from src.dataset import batch_generator
-from src.helpers.args import ModulesOptions as Options
 from src.helpers.constants import (
     WEIGHTS_DIR,
     OUTPUT_DIR,
@@ -70,19 +70,20 @@ def set_seed(seed: Optional[int]):
     torch.backends.cudnn.benchmark = False
 
 
-def xavier_gru_init(module: nn.Module) -> None:
-    if isinstance(module, nn.GRU):
-        for name, param in module.named_parameters():
+def xavier_gru_init(m: nn.Module) -> None:
+    if isinstance(m, nn.GRU):
+        for name, p in m.named_parameters():
+            t = cast(Tensor, p)
             if "weight_ih" in name:
-                nn.init.xavier_uniform_(param.data)
+                nn.init.xavier_uniform_(t)
             elif "weight_hh" in name:
-                nn.init.orthogonal_(param.data)
+                nn.init.orthogonal_(t)
             elif "bias" in name:
-                nn.init.zeros_(param.data)
-    elif isinstance(module, nn.Linear):
-        nn.init.xavier_uniform_(module.weight)
-        if module.bias is not None:
-            nn.init.zeros_(module.bias)
+                nn.init.zeros_(t)
+    elif isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
 
 
 class Encoder(nn.Module):
@@ -207,6 +208,18 @@ class TimeGANHandles:
     discriminator: Discriminator
 
 
+@runtime_checkable
+class OptLike(Protocol):
+    batch_size: int
+    seq_len: int
+    z_dim: int
+    hidden_dim: int
+    num_layer: int
+    lr: float
+    beta1: float
+    w_gamma: float
+    w_g: float
+
 class TimeGAN:
     """
     End-to-end TimeGAN wrapper with training & generation utilities.
@@ -214,14 +227,14 @@ class TimeGAN:
 
     def __init__(
             self,
-            opt: Options | object,
+            opt: OptLike,
             train_data: NDArray[np.float32],
             val_data: NDArray[np.float32],
             test_data: NDArray[np.float32],
             load_weights: bool = False,
     ) -> None:
         # set seed & device
-        set_seed(getattr(opt, "manualseed", None))
+        set_seed(getattr(opt, "manualseed", getattr(opt, "seed", None)))
         self.device = get_device()
 
         # options
