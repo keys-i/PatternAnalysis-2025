@@ -19,19 +19,20 @@ from src.helpers.args import Options
 
 
 def train() -> None:
-    # parse cli args as before
+    # parse top-level CLI args
     opt = Options().parse()
 
-    # train_data: [N, T, F]; val/test should be 2D [T, F] for quick metrics
-    train_data, val_data, test_data = load_data(opt)
-    # if val/test come windowed [N, T, F], flatten to [T', F]
+    # dataset-only args → loader
+    train_data, val_data, test_data = load_data(opt.dataset)
+
+    # if val/test are windowed [N, T, F], flatten to [T', F]
     if getattr(val_data, "ndim", None) == 3:
         val_data = val_data.reshape(-1, val_data.shape[-1])
     if getattr(test_data, "ndim", None) == 3:
         test_data = test_data.reshape(-1, test_data.shape[-1])
 
-    # build and train
-    model = TimeGAN(opt, train_data, val_data, test_data, load_weights=False)
+    # modules-only args → model
+    model = TimeGAN(opt.modules, train_data, val_data, test_data, load_weights=False)
     model.train_model()
 
 
