@@ -30,22 +30,20 @@ from modules import TimeGAN
 
 
 def main() -> None:
-    # parse CLI args
-    opt = Options().parse()
+    # parse CLI args (top-level)
+    top = Options().parse()
 
-    # load data
-    train_data, val_data, test_data = load_data(opt)
+    # load data using ONLY dataset options
+    train_data, val_data, test_data = load_data(top.dataset)
 
-    # build model and load weights
-    model = TimeGAN(opt, train_data, val_data, test_data, load_weights=True)
+    # build model using ONLY modules/training options
+    model = TimeGAN(top.modules, train_data, val_data, test_data, load_weights=True)
 
     # inference: generate exactly len(test_data) rows (2D array)
-    # if test_data is windowed [N,T,F], flatten length to T' for parity.
-    num_rows = int(len(test_data))
     if getattr(test_data, "ndim", None) == 3:
         num_rows = int(test_data.shape[0] * test_data.shape[1])
     else:
-        num_rows = int(len(test_data))
+        num_rows = int(test_data.shape[0])
     synth = model.generate(num_rows=num_rows, mean=0.0, std=1.0)
 
     # save
