@@ -47,7 +47,7 @@ def main() -> None:
     synth = model.generate(num_rows=num_rows, mean=0.0, std=1.0)
 
     # save
-    out_dir = Path(OUTPUT_DIR)
+    out_dir = OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "gen_data.npy"
     np.save(out_path, synth)

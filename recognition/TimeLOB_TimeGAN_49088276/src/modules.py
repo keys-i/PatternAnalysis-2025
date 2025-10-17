@@ -280,7 +280,7 @@ class TimeGAN:
 
     @staticmethod
     def _ckpt_path() -> Path:
-        out = Path(OUTPUT_DIR) / WEIGHTS_DIR
+        out = OUTPUT_DIR / WEIGHTS_DIR
         out.mkdir(parents=True, exist_ok=True)
         return out / "timegan_ckpt.pt"
 

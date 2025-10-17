@@ -130,12 +130,12 @@ if "__main__" == __name__:
     model = TimeGAN(top.modules, train, val, test, load_weights=True)
 
     # real heatmap from test data
-    real_path = Path(OUTPUT_DIR) / "real.png"
+    real_path = OUTPUT_DIR / "real.png"
     plot_heatmap(test, title="Real LOB Depth", save_path=real_path, show=False)
 
     for i in range(3):
         synth = model.generate(num_rows=len(test))
-        synth_path = Path(OUTPUT_DIR) / f"synthetic_heatmap_{i}.png"
+        synth_path = OUTPUT_DIR / f"synthetic_heatmap_{i}.png"
         plot_heatmap(synth, title=f"Synthetic LOB Depth #{i}", save_path=synth_path, show=False)
         score = get_ssim(real_path, synth_path)
         print(f"SSIM(real, synthetic_{i}) = {score:.4f}")

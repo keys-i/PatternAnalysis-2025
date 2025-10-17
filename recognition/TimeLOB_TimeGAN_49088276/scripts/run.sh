@@ -13,7 +13,11 @@
 # conda env create -f environment.yml
 # conda activate timegan
 
-python ../src/train.py \
+cd ..
+export PROJECT_ROOT="$PWD"
+export PYTHONPATH="$PWD"
+
+python src/train.py \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \
@@ -30,7 +34,7 @@ python ../src/train.py \
     --w-gamma 1.0 \
     --w-g 1.0
 
-python ../src/predict.py \
+python src/predict.py \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \

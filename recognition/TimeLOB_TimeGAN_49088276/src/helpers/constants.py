@@ -1,11 +1,27 @@
 """
 Configuration constants for the project.
 """
+from __future__ import annotations
 from math import isclose
+from pathlib import Path
+import os
+import subprocess
 
-OUTPUT_DIR = "outs"
-WEIGHTS_DIR = "weights"
-DATA_DIR = "data"
+def _repo_root() -> Path:
+    env = os.getenv("PROJECT_ROOT")
+    if env:
+        return Path(env).resolve()
+    try:
+        out = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+        return Path(out).resolve()
+    except subprocess.CalledProcessError:
+        return Path(__file__).resolve().parents[2]
+
+ROOT_DIR = _repo_root()
+
+OUTPUT_DIR = ROOT_DIR / "outs"
+WEIGHTS_DIR = ROOT_DIR / "weights"
+DATA_DIR = ROOT_DIR /"data"
 
 ORDERBOOK_FILENAME = "AMZN_2012-06-21_34200000_57600000_orderbook_10.csv"
 

@@ -3,6 +3,7 @@ Options for the entire model
 """
 from __future__ import annotations
 
+import sys
 from argparse import ArgumentParser, Namespace, REMAINDER
 from typing import Optional, List
 
@@ -54,16 +55,18 @@ class DataOptions:
         self._parser = parser
 
     def parse(self, argv: Optional[List[str]]) -> Namespace:
-        args = self._parser.parse_args(argv)
+        if argv is None:
+            argv = []
+        ds = self._parser.parse_args(argv)
 
         ns = Namespace(
-            seq_len=args.seq_len,
-            data_dir=args.data_dir,
-            orderbook_filename=args.orderbook_filename,
-            splits=tuple(args.splits) if args.splits is not None else TRAIN_TEST_SPLIT,
-            shuffle_windows=not args.no_shuffle,
+            seq_len=ds.seq_len,
+            data_dir=ds.data_dir,
+            orderbook_filename=ds.orderbook_filename,
+            splits=tuple(ds.splits) if ds.splits is not None else TRAIN_TEST_SPLIT,
+            shuffle_windows=not ds.no_shuffle,
             dtype=np.float32,
-            filter_zero_rows=not args.keep_zero_rows,
+            filter_zero_rows=not ds.keep_zero_rows,
         )
 
         return ns
@@ -110,6 +113,8 @@ class ModulesOptions:
         self._parser = parser
 
     def parse(self, argv: Optional[List[str]]) -> Namespace:
+        if argv is None:
+            argv = []
         m = self._parser.parse_args(argv)
 
         ns = Namespace(
@@ -161,26 +166,43 @@ class Options:
         self._parser = parser
 
     def parse(self, argv: Optional[List[str]] = None) -> Namespace:
-        top = self._parser.parse_args(argv)
 
-        # dataset namespace
-        ds_argv = top.dataset if top.dataset is not None else []
-        dataset_ns = DataOptions().parse(ds_argv)
+        # raw tokens (exclude program name)
+        tokens: List[str] = list(sys.argv[1:] if argv is None else argv)
 
-        # modules namespace
-        mod_argv = top.modules if top.modules is not None else []
-        modules_ns = ModulesOptions().parse(mod_argv)
+        # extract sections: --dataset ..., --modules ...
+        def extract(flag: str, toks: List[str]) -> tuple[List[str], List[str]]:
+            if flag not in toks:
+                return [], toks
+            i = toks.index(flag)
+            rest = toks[i + 1:]
+            # stop at the next section flag (or end)
+            next_indices = [j for j, t in enumerate(rest) if t in ("--dataset", "--modules")]
+            end = next_indices[0] if next_indices else len(rest)
+            section = rest[:end]
+            remaining = toks[:i] + rest[end:]
+            return section, remaining
 
-        # attach nested namespace to the top-level namespace
-        out = Namespace(
+        ds_args, remaining = extract("--dataset", tokens)
+        mod_args, remaining = extract("--modules", remaining)
+
+        # parse top-level only from what's left (seed/run-name)
+        top = self._parser.parse_args(remaining)
+
+        # parse subsections (never read global argv inside these)
+        dataset_ns = DataOptions().parse(ds_args or [])
+        modules_ns = ModulesOptions().parse(mod_args or [])
+
+        # assemble composite namespace
+        return Namespace(
             seed=top.seed,
             run_name=top.run_name,
             dataset=dataset_ns,
             modules=modules_ns,
         )
 
-        return out
 
 if __name__ == "__main__":
     opts = Options().parse()
     print(opts)
+

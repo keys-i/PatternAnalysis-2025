@@ -63,7 +63,7 @@ class DatasetConfig:
     Configuration for loading and preprocessing order-book data.
     """
     seq_len: int
-    data_dir: Path = field(default_factory=lambda: Path(DATA_DIR))
+    data_dir: Path = DATA_DIR
     orderbook_filename: str = ORDERBOOK_FILENAME
     splits: Tuple[float, float, float] = TRAIN_TEST_SPLIT
     shuffle_windows: bool = True
@@ -107,6 +107,7 @@ class LOBDataset:
         self._filtered = data.astype(self.cfg.dtype)
 
         self._split_chronological()
+
         self._scale_train_only()
         print("Dataset loaded, split, and scaled.")
         return self
@@ -160,17 +161,38 @@ class LOBDataset:
     def _split_chronological(self) -> None:
         assert self._filtered is not None, "Call load() first."
         n = len(self._filtered)
-        t_frac, v_frac, _ = self.cfg.splits
-        t_cutoff = int(n * t_frac)
-        v_cutoff = int(n * v_frac)
-        self._train = self._filtered[:t_cutoff]
-        self._val = self._filtered[t_cutoff:v_cutoff]
-        self._test = self._filtered[v_cutoff:]
+        a, b, c = self.cfg.splits
 
-        assert all(
-            len(d) > 5 for d in (self._train, self._val, self._test)
-        ), "Each split must have at least 5 windows."
-        print("Split sizes - train: %d, val: %d, test: %d", len(self._train), len(self._val), len(self._test))
+        # proportions if they sum to ~1.0; otherwise treat as cumulative cutoffs
+        if abs((a + b + c) - 1.0) < 1e-6:
+            # proportions → cumulative
+            t_cut = int(n * a)
+            v_cut = int(n * (a + b))
+        else:
+            # cumulative; require 0 < a < b <= 1.0
+            if not (0.0 < a < b <= 1.0 + 1e-9):
+                raise ValueError(f"Invalid cumulative splits {self.cfg.splits}; "
+                                 "expected 0 < TRAIN < VAL ≤ 1.")
+            t_cut = int(n * a)
+            v_cut = int(n * b)
+
+        self._train = self._filtered[:t_cut]
+        self._val = self._filtered[t_cut:v_cut]
+        self._test = self._filtered[v_cut:]
+
+        # window-aware sanity check
+        L = self.cfg.seq_len
+
+        def nwin(x):
+            return len(x) - L + 1
+
+        min_w = 5
+        if any(nwin(x) < min_w for x in (self._train, self._val, self._test)):
+            raise ValueError(
+                f"Not enough windows with seq_len={L} (need ≥{min_w}): "
+                f"train={nwin(self._train)}, val={nwin(self._val)}, test={nwin(self._test)}. "
+                "Try smaller --seq-len, different --splits, or --keep_zero_rows."
+            )
 
     def _scale_train_only(self) -> None:
         assert (
@@ -209,23 +231,43 @@ class LOBDataset:
 
 
 def batch_generator(
-        data: NDArray[np.float32],
-        time: Optional[NDArray[np.float32]],
-        batch_size: int,
-):
+    data: NDArray[np.float32],
+    time: Optional[NDArray[np.int32]],
+    batch_size: int,
+) -> Tuple[NDArray[np.float32], NDArray[np.int32]]:
     """
-    Random mini-batch generator
-    if `time` is None, uses a constant length equal to data.shape[1] (seq_len).
-    """
-    n = len(data)
-    idx = np.random.choice(n, size=batch_size, replace=True)
-    data_mb = data[idx].astype(np.float32)
-    if time is not None:
-        t_mb = np.full((batch_size,), data_mb.shape[1], dtype=np.int32)
-    else:
-        t_mb = time[idx].astype(np.int32)
-    return data_mb, t_mb
+    Random mini-batch generator for windowed sequences.
 
+    Args:
+        data: Array of shape [N, T, F] (windowed sequences).
+        time: Optional array of shape [N] giving per-window lengths (T_i).
+              If None, returns a constant length vector == data.shape[1].
+        batch_size: Number of windows to sample (with replacement).
+
+    Returns:
+        data_mb: [batch_size, T, F] float32 mini-batch.
+        T_mb:    [batch_size] int32 vector of sequence lengths.
+    """
+    if data.ndim != 3:
+        raise ValueError(f"`data` must be [N, T, F]; got shape {data.shape}")
+
+    n = data.shape[0]
+    if n == 0:
+        raise ValueError("Cannot sample mini-batch from empty data.")
+
+    rng = np.random.default_rng()
+    idx = rng.integers(0, n, size=batch_size)  # with replacement
+
+    data_mb = data[idx].astype(np.float32, copy=False)
+
+    if time is None:
+        T_mb = np.full((batch_size,), data_mb.shape[1], dtype=np.int32)
+    else:
+        if time.shape[0] != n:
+            raise ValueError(f"`time` length {time.shape[0]} does not match N={n}.")
+        T_mb = time[idx].astype(np.int32, copy=False)
+
+    return data_mb, T_mb
 
 def load_data(arg: Namespace) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """
