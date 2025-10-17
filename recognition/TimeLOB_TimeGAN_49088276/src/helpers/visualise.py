@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
-from skimage import img_as_float
+from skimage.util import img_as_float
 from skimage.metrics import structural_similarity as ssim
 
 from args import Options
