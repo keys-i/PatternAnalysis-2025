@@ -1,15 +1,21 @@
-name: proj-env
+name: timegan
 channels:
   - conda-forge
 dependencies:
   - python=3.13
-  - pip
-  - tabulate
   - numpy
   - pandas
   - scipy
   - scikit-learn
+  - scikit-image
   - matplotlib
   - jupyterlab
   - ipykernel
+  - pytorch
+  - torchvision
+  - pillow
+  - tqdm
+  - typing-extensions
+  - pip
   - pip:
+      - # add any repo-specific pip deps here if need

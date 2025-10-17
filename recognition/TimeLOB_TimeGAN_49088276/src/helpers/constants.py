@@ -2,7 +2,6 @@
 Configuration constants for the project.
 """
 from math import isclose
-from typing import Literal
 
 OUTPUT_DIR = "outs"
 WEIGHTS_DIR = "weights"
