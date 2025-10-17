@@ -56,13 +56,15 @@ def plot_heatmap(
     # slice views
     # for each level L: price indices = 4*L + (0 for ask, 2 for bid)
     # vol indices = price_idx + 1
-    prices_ask = np.stack([data_2d[:, 4 * L + 0] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    vols_ask = np.stack([data_2d[:, 4 * L + 1] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    prices_bid = np.stack([data_2d[:, 4 * L + 2] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    vols_bid = np.stack([data_2d[:, 4 * L + 3] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-
+    prices_ask  = np.stack([data_2d[:, 4 * L + 0] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    vols_ask    = np.stack([data_2d[:, 4 * L + 1] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    prices_bid  = np.stack([data_2d[:, 4 * L + 2] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    vols_bid    = np.stack([data_2d[:, 4 * L + 3] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
     # Normalise volumes for alpha
-    max_vol = float(np.max([vols_ask.max(initial=0), vols_bid.max(initial=0)])) or 1.0
+    max_vol = float(max(vols_ask.max(), vols_bid.max()))
+    if not np.isfinite(max_vol) or max_vol <= 0:
+        max_vol = 1.0
+
     a_ask = (vols_ask / max_vol).astype(np.float32)
     a_bid = (vols_bid / max_vol).astype(np.float32)
 
@@ -89,8 +91,8 @@ def plot_heatmap(
     ], axis=1)
 
     # limits
-    pmin = float(np.minimum(prices_ask.min(initial=0), prices_bid.min(initial=0)))
-    pmax = float(np.maximum(prices_ask.max(initial=0), prices_bid.max(initial=0)))
+    pmin = float(min(prices_ask.min(), prices_bid.min()))
+    pmax = float(max(prices_ask.max(), prices_bid.max()))
 
     # plot
     fig, ax = plt.subplots(figsize=(10, 6), dpi=dpi)
@@ -100,8 +102,8 @@ def plot_heatmap(
     if title:
         ax.set_title(title)
 
-    ax.scatter(x_ask, y_ask, c=c_ask)
-    ax.scatter(x_bid, y_bid, c=c_bid)
+    ax.scatter(x_ask, y_ask, c=c_ask, s=1)
+    ax.scatter(x_bid, y_bid, c=c_bid, s=1)
 
     fig.tight_layout()
     if save_path is not None:
@@ -111,15 +113,21 @@ def plot_heatmap(
         plt.show()
     plt.close(fig)
 
+
 if "__main__" == __name__:
     # cli
-    opt = Options().parse()
+    top = Options().parse()
 
     # data
-    train, val, test = load_data(opt)
+    train, val, test = load_data(top.dataset)
+    # flatten windowed val/test ([N,T,F] -> [T',F]) for viz/metrics
+    if getattr(val, "ndim", None) == 3:
+        val = val.reshape(-1, val.shape[-1])
+    if getattr(test, "ndim", None) == 3:
+        test = test.reshape(-1, test.shape[-1])
 
     # model (load weights)
-    model = TimeGAN(opt, train, val, test, load_weights=True)
+    model = TimeGAN(top.modules, train, val, test, load_weights=True)
 
     # real heatmap from test data
     real_path = Path(OUTPUT_DIR) / "real.png"
