@@ -32,15 +32,15 @@ class DataOptions:
             description="Lightweight LOBSTER preprocessing + MinMax scaling",
         )
         parser.add_argument("--seq-len", type=int, default=128)
-        parser.add_argument("--data_dir", type=str, default=str(DATA_DIR))
-        parser.add_argument("--orderbook_filename", type=str, default=ORDERBOOK_FILENAME)
+        parser.add_argument("--data-dir", dest="data_dir", type=str, default=str(DATA_DIR))
+        parser.add_argument("--orderbook-filename", dest="orderbook_filename", type=str, default=ORDERBOOK_FILENAME)
         parser.add_argument(
             "--no-shuffle",
             action="store_true",
             help="Disable shuffling of windowed sequences"
         )
         parser.add_argument(
-            "--keep_zero_rows",
+            "--keep-zero-rows", dest="keep_zero_rows",
             action="store_true",
             help="Do NOT filter rows containing zeros."
         )
