@@ -14,7 +14,7 @@ Created By: Radhesh Goel (Keys-I)
 from __future__ import annotations
 
 from argparse import Namespace
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -22,6 +22,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from src.helpers.constants import DATA_DIR, ORDERBOOK_FILENAME, TRAIN_TEST_SPLIT
+from src.helpers.richie import log as rlog, status as rstatus, dataset_summary
 
 
 class MinMaxScaler:
@@ -39,9 +40,7 @@ class MinMaxScaler:
         self._max = np.max(data, axis=0)
         return self
 
-    def transform(
-            self, data: NDArray[np.floating]
-    ) -> NDArray[np.floating]:
+    def transform(self, data: NDArray[np.floating]) -> NDArray[np.floating]:
         if self._min is None or self._max is None:
             raise RuntimeError("Scaler must be fitted before transform.")
         numerator = data - self._min
@@ -55,7 +54,6 @@ class MinMaxScaler:
         if self._min is None or self._max is None:
             raise RuntimeError("Scaler must be fitted before inverse_transform.")
         return data * ((self._max - self._min) + self.epsilon) + self._min
-
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -81,16 +79,12 @@ class DatasetConfig:
             filter_zero_rows=getattr(arg, "filter_zero_rows", True),
         )
 
-
 class LOBDataset:
     """
     End-to-end loader for a single LOBSTER orderbook file
     """
 
-    def __init__(
-            self, cfg: DatasetConfig,
-            scaler: Optional[MinMaxScaler] = None
-    ):
+    def __init__(self, cfg: DatasetConfig, scaler: Optional[MinMaxScaler] = None):
         self.cfg = cfg
         self.scaler = scaler or MinMaxScaler()
 
@@ -101,32 +95,28 @@ class LOBDataset:
         self._test: Optional[NDArray[np.floating]] = None
 
     def load(self) -> "LOBDataset":
-        print("Loading and preprocessing LOBSTER orderbook dataset...")
-        data = self._read_raw()
-        data = self._filter_unoccupied(data) if self.cfg.filter_zero_rows else data.astype(self.cfg.dtype)
-        self._filtered = data.astype(self.cfg.dtype)
+        with rstatus("[bold cyan]Loading and preprocessing LOBSTER orderbook dataset..."):
+            data = self._read_raw()
+            data = self._filter_unoccupied(data) if self.cfg.filter_zero_rows else data.astype(self.cfg.dtype)
+            self._filtered = data.astype(self.cfg.dtype)
 
-        self._split_chronological()
+            self._split_chronological()
+            self._scale_train_only()
 
-        self._scale_train_only()
-        print("Dataset loaded, split, and scaled.")
+        self._render_summary()
+        rlog("[green]Dataset loaded, split, and scaled.[/green]")
         return self
 
-    def make_windows(
-            self,
-            split: str = "train"
-    ) -> NDArray[np.float32]:
+    def make_windows(self, split: str = "train") -> NDArray[np.float32]:
         """
         Window the selected split into shape (num_windows, seq_len, num_features).
         """
         data = self._select_split(split)
         return self._windowize(data, self.cfg.seq_len, self.cfg.shuffle_windows)
 
-    def dataset_windowed(
-            self
-    ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+    def dataset_windowed(self) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
         """
-            Return (train_w, val_w, test_w) as windowed arrays.
+        Return (train_w, val_w, test_w) as windowed arrays.
         """
         train_w = self.make_windows(split="train")
         val_w = self.make_windows(split="val")
@@ -143,9 +133,9 @@ class LOBDataset:
                 "and place the '..._orderbook_10' file in the data directory."
             )
             raise FileNotFoundError(msg)
-        print("Reading orderbook file...", path)
+        rlog(f"[bold]Reading orderbook file[/bold]: {path}")
         raw = np.loadtxt(path, delimiter=",", skiprows=0, dtype=np.int64)
-        print("Raw shape:", raw.shape)
+        rlog(f"Raw shape: {raw.shape}")
         self._raw = raw
         return raw
 
@@ -155,7 +145,7 @@ class LOBDataset:
         """
         mask = ~(data == 0).any(axis=1)
         filtered = data[mask].astype(np.float32)
-        print("Filtered rows (no zeros). Shape", filtered.shape)
+        rlog(f"Filtered rows (no zeros). Shape {filtered.shape}")
         return filtered
 
     def _split_chronological(self) -> None:
@@ -171,8 +161,9 @@ class LOBDataset:
         else:
             # cumulative; require 0 < a < b <= 1.0
             if not (0.0 < a < b <= 1.0 + 1e-9):
-                raise ValueError(f"Invalid cumulative splits {self.cfg.splits}; "
-                                 "expected 0 < TRAIN < VAL ≤ 1.")
+                raise ValueError(
+                    f"Invalid cumulative splits {self.cfg.splits}; expected 0 < TRAIN < VAL ≤ 1."
+                )
             t_cut = int(n * a)
             v_cut = int(n * b)
 
@@ -183,7 +174,9 @@ class LOBDataset:
         # window-aware sanity check
         L = self.cfg.seq_len
 
-        def nwin(x):
+        def nwin(x: Optional[NDArray[np.floating]]) -> int:
+            if x is None:
+                return 0
             return len(x) - L + 1
 
         min_w = 5
@@ -196,20 +189,20 @@ class LOBDataset:
 
     def _scale_train_only(self) -> None:
         assert (
-                self._train is not None
-                and self._val is not None
-                and self._test is not None
+            self._train is not None
+            and self._val is not None
+            and self._test is not None
         )
-        print("Fitting MinMaxScaler on train split.")
+        rlog("[bold magenta]Fitting MinMaxScaler on train split.[/bold magenta]")
         self._train = self.scaler.fit_transform(self._train)
         self._val = self.scaler.transform(self._val)
         self._test = self.scaler.transform(self._test)
 
     def _windowize(
-            self,
-            data: NDArray[np.float32],
-            seq_len: int,
-            shuffle_windows: bool
+        self,
+        data: NDArray[np.float32],
+        seq_len: int,
+        shuffle_windows: bool
     ) -> NDArray[np.float32]:
         n_samples, n_features = data.shape
         n_windows = n_samples - seq_len + 1
@@ -224,10 +217,36 @@ class LOBDataset:
         return out
 
     def _select_split(self, split: str) -> NDArray[np.float32]:
-        if split == "train": return self._train
-        if split == "val": return self._val
-        if split == "test": return self._test
+        if split == "train":
+            return self._train  # type: ignore[return-value]
+        if split == "val":
+            return self._val    # type: ignore[return-value]
+        if split == "test":
+            return self._test   # type: ignore[return-value]
         raise ValueError("split must be 'train', 'val' or 'test'")
+
+    def _render_summary(self) -> None:
+        # compute rows/windows
+        L = self.cfg.seq_len
+
+        def counts(arr: Optional[NDArray[np.floating]]) -> tuple[int, int]:
+            rows = 0 if arr is None else int(arr.shape[0])
+            wins = max(0, rows - L + 1)
+            return rows, wins
+
+        splits_for_view = [
+            ("train", counts(self._train)),
+            ("val",   counts(self._val)),
+            ("test",  counts(self._test)),
+        ]
+
+        dataset_summary(
+            file_path=Path(self.cfg.data_dir, self.cfg.orderbook_filename),
+            seq_len=self.cfg.seq_len,
+            dtype_name=self.cfg.dtype.__name__,
+            filter_zero_rows=self.cfg.filter_zero_rows,
+            splits=splits_for_view,
+        )
 
 
 def batch_generator(
@@ -272,12 +291,15 @@ def batch_generator(
 def load_data(arg: Namespace) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """
     Backwards-compatible wrapper.
+    Returns:
+        train_w: [Nw, T, F] windowed training sequences
+        val:     [Tv, F]    validation rows (scaled)
+        test:    [Ts, F]    test rows (scaled)
     """
     cfg = DatasetConfig.from_namespace(arg)
     loader = LOBDataset(cfg).load()
     train_w = loader.make_windows("train")
     val = loader._val
     test = loader._test
-    print("Stock dataset has been loaded and preprocessed.")
+    rlog("[bold green]Stock dataset has been loaded and preprocessed.[/bold green]")
     return train_w, val, test
-
