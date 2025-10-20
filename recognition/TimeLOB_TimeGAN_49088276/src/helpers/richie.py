@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import contextvars
+import itertools
+import threading
+import time
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
@@ -16,7 +19,9 @@ except Exception:  # fallback if rich isn’t installed
     _CONSOLE = None
 
 # track nesting depth per context/thread
-_live_depth: contextvars.ContextVar[int] = contextvars.ContextVar("_live_depth", default=0)
+_live_depth: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "_live_depth", default=0
+)
 
 
 def log(msg: str) -> None:
@@ -27,25 +32,58 @@ def log(msg: str) -> None:
 
 
 def status(msg: str):
-    """Re-entrant-safe status spinner. Nested calls become no-ops."""
+    """Re-entrant-safe status spinner with animated ellipsis.
+    - Outermost call starts a Rich status + a background thread that updates the text with a moving ellipsis.
+    - Nested calls become no-ops to avoid stacking spinners.
+    """
     depth = _live_depth.get()
     if _CONSOLE and depth == 0:
-        cm = _CONSOLE.status(msg)
+        rich_status = _CONSOLE.status(msg)
+        stop_flag = threading.Event()
+        dots = itertools.cycle(
+            ["", ".", "..", "...", "....", ".....", "....", "...", "..", "."]
+        )
 
         class _Wrapper:
             def __enter__(self):
-                _live_depth.set(depth + 1)
-                return cm.__enter__()
+                self._token = _live_depth.set(depth + 1)
+                self._ctx = rich_status.__enter__()
+
+                # start a tiny background updater that animates the message
+                def _tick():
+                    # small initial delay so first frame shows base msg
+                    next_tick = time.time() + 0.35
+                    while not stop_flag.wait(timeout=max(0.0, next_tick - time.time())):
+                        try:
+                            rich_status.update(f"{msg}{next(dots)}")
+                        except Exception:
+                            # Be resilient to any console teardown
+                            pass
+                        next_tick = time.time() + 0.35
+
+                self._thr = threading.Thread(
+                    target=_tick, name="rich-status-ellipsis", daemon=True
+                )
+                self._thr.start()
+                return self._ctx
 
             def __exit__(self, exc_type, exc, tb):
                 try:
-                    return cm.__exit__(exc_type, exc, tb)
+                    # stop animation and restore base message for a clean exit frame
+                    stop_flag.set()
+                    if hasattr(self, "_thr"):
+                        self._thr.join(timeout=0.3)
+                    try:
+                        rich_status.update(msg)
+                    except Exception:
+                        pass
+                    return rich_status.__exit__(exc_type, exc, tb)
                 finally:
-                    _live_depth.set(depth)
+                    _live_depth.reset(self._token)
 
         return _Wrapper()
 
-    # nested: no-op
+    # nested: no-op to keep output clean
     class _Noop:
         def __enter__(self):
             return None
