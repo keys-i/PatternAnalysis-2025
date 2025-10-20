@@ -14,8 +14,8 @@ References:
 - 
 """
 from src.dataset import load_data
-from src.modules import TimeGAN
 from src.helpers.args import Options
+from src.modules import TimeGAN
 
 
 def train() -> None:

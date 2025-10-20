@@ -209,25 +209,34 @@ class Discriminator(nn.Module):
 @dataclass
 class TrainingHistory:
     er_iters: List[int] = field(default_factory=list)
-    er_vals:  List[float] = field(default_factory=list)
+    er_vals: List[float] = field(default_factory=list)
 
     s_iters: List[int] = field(default_factory=list)
-    s_vals:  List[float] = field(default_factory=list)
+    s_vals: List[float] = field(default_factory=list)
 
     g_iters: List[int] = field(default_factory=list)
-    g_vals:  List[float] = field(default_factory=list)
+    g_vals: List[float] = field(default_factory=list)
 
     d_iters: List[int] = field(default_factory=list)
-    d_vals:  List[float] = field(default_factory=list)
+    d_vals: List[float] = field(default_factory=list)
 
     kl_iters: List[int] = field(default_factory=list)
-    kl_vals:  List[float] = field(default_factory=list)
+    kl_vals: List[float] = field(default_factory=list)
 
-    def add_er(self, it: int, v: float) -> None: self.er_iters.append(it); self.er_vals.append(v)
-    def add_s (self, it: int, v: float) -> None: self.s_iters.append(it); self.s_vals.append(v)
-    def add_g (self, it: int, v: float) -> None: self.g_iters.append(it); self.g_vals.append(v)
-    def add_d (self, it: int, v: float) -> None: self.d_iters.append(it); self.d_vals.append(v)
-    def add_kl(self, it: int, v: float) -> None: self.kl_iters.append(it); self.kl_vals.append(v)
+    def add_er(self, it: int, v: float) -> None:
+        self.er_iters.append(it); self.er_vals.append(v)
+
+    def add_s(self, it: int, v: float) -> None:
+        self.s_iters.append(it); self.s_vals.append(v)
+
+    def add_g(self, it: int, v: float) -> None:
+        self.g_iters.append(it); self.g_vals.append(v)
+
+    def add_d(self, it: int, v: float) -> None:
+        self.d_iters.append(it); self.d_vals.append(v)
+
+    def add_kl(self, it: int, v: float) -> None:
+        self.kl_iters.append(it); self.kl_vals.append(v)
 
     def save_plots(self, out_dir: Path, total_iters: int) -> Dict[str, Path]:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -236,14 +245,18 @@ class TrainingHistory:
         # Training losses
         fig, ax = plt.subplots(figsize=(9, 5))
         if self.er_iters: ax.plot(self.er_iters, self.er_vals, label="Recon (E,R)")
-        if self.s_iters:  ax.plot(self.s_iters,  self.s_vals,  label="Supervisor (S)")
-        if self.g_iters:  ax.plot(self.g_iters,  self.g_vals,  label="Generator (G)")
-        if self.d_iters:  ax.plot(self.d_iters,  self.d_vals,  label="Discriminator (D)")
+        if self.s_iters:  ax.plot(self.s_iters, self.s_vals, label="Supervisor (S)")
+        if self.g_iters:  ax.plot(self.g_iters, self.g_vals, label="Generator (G)")
+        if self.d_iters:  ax.plot(self.d_iters, self.d_vals, label="Discriminator (D)")
         ax.set_title("Training Losses vs Iteration")
-        ax.set_xlabel("Iteration"); ax.set_ylabel("Loss")
+        ax.set_xlabel("Iteration");
+        ax.set_ylabel("Loss")
         ax.set_xlim(1, max([total_iters, *self.er_iters, *self.s_iters, *self.g_iters, *self.d_iters] or [total_iters]))
-        ax.legend(loc="best"); fig.tight_layout()
-        p1 = out_dir / "training_curves.png"; fig.savefig(p1, dpi=150, bbox_inches="tight"); plt.close(fig)
+        ax.legend(loc="best");
+        fig.tight_layout()
+        p1 = out_dir / "training_curves.png";
+        fig.savefig(p1, dpi=150, bbox_inches="tight");
+        plt.close(fig)
         saved["training_curves"] = p1
 
         # KL(spread)
@@ -251,9 +264,13 @@ class TrainingHistory:
             fig, ax = plt.subplots(figsize=(9, 3.5))
             ax.plot(self.kl_iters, self.kl_vals, marker="o", linewidth=1)
             ax.set_title("Validation KL(spread) vs Iteration")
-            ax.set_xlabel("Iteration"); ax.set_ylabel("KL(spread)")
-            ax.set_xlim(1, max(self.kl_iters)); fig.tight_layout()
-            p2 = out_dir / "kl_spread_curve.png"; fig.savefig(p2, dpi=150, bbox_inches="tight"); plt.close(fig)
+            ax.set_xlabel("Iteration");
+            ax.set_ylabel("KL(spread)")
+            ax.set_xlim(1, max(self.kl_iters));
+            fig.tight_layout()
+            p2 = out_dir / "kl_spread_curve.png";
+            fig.savefig(p2, dpi=150, bbox_inches="tight");
+            plt.close(fig)
             saved["kl_spread_curve"] = p2
 
         return saved
@@ -544,7 +561,7 @@ class TimeGAN:
                         kl = float("nan")
                 except Exception:
                     kl = float("nan")
-                    self.history.add_kl(it+1, kl)
+                    self.history.add_kl(it + 1, kl)
                 self._save()
                 rlog(
                     f"[Joint] it={it + 1:,}  G={g_loss:.4f} (ema={g_ema:.4f})  "

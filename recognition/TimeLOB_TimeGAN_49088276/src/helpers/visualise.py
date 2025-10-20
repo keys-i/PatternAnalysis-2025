@@ -10,21 +10,21 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
-from skimage.util import img_as_float
 from skimage.metrics import structural_similarity as ssim
+from skimage.util import img_as_float
 
+from src.dataset import load_data
 # use nested CLI options + constants from src.helpers
 from src.helpers.args import Options
 from src.helpers.constants import OUTPUT_DIR, NUM_LEVELS
 from src.helpers.richie import log as rlog, status as rstatus, rule as rrule
-
-from src.dataset import load_data
 from src.modules import TimeGAN
 
 # optional pretty table for SSIM results (graceful fallback if rich unavailable)
 try:
     from rich.table import Table
     from rich import box
+
     _HAS_RICH_TABLE = True
 except Exception:
     _HAS_RICH_TABLE = False
@@ -48,12 +48,12 @@ def get_ssim(img1_path: Path | str, img2_path: Path | str) -> float:
 
 
 def plot_heatmap(
-    data_2d: NDArray,  # shape [T, F]
-    *,
-    title: str | None = None,
-    save_path: Path | str | None = None,
-    show: bool = True,
-    dpi: int = 150,
+        data_2d: NDArray,  # shape [T, F]
+        *,
+        title: str | None = None,
+        save_path: Path | str | None = None,
+        show: bool = True,
+        dpi: int = 150,
 ) -> None:
     """
     Scatter-based depth heatmap.
@@ -68,9 +68,9 @@ def plot_heatmap(
     # for each level L: price indices = 4*L + (0 for ask, 2 for bid)
     # vol indices = price_idx + 1
     prices_ask = np.stack([data_2d[:, 4 * L + 0] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    vols_ask   = np.stack([data_2d[:, 4 * L + 1] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    vols_ask = np.stack([data_2d[:, 4 * L + 1] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
     prices_bid = np.stack([data_2d[:, 4 * L + 2] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    vols_bid   = np.stack([data_2d[:, 4 * L + 3] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    vols_bid = np.stack([data_2d[:, 4 * L + 3] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
 
     # Normalise volumes for alpha
     max_vol = float(max(prices_ask.size and vols_ask.max(), prices_bid.size and vols_bid.max()))

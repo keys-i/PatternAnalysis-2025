@@ -55,6 +55,7 @@ class MinMaxScaler:
             raise RuntimeError("Scaler must be fitted before inverse_transform.")
         return data * ((self._max - self._min) + self.epsilon) + self._min
 
+
 @dataclass(frozen=True)
 class DatasetConfig:
     """
@@ -78,6 +79,7 @@ class DatasetConfig:
             dtype=getattr(arg, "dtype", np.float32),
             filter_zero_rows=getattr(arg, "filter_zero_rows", True),
         )
+
 
 class LOBDataset:
     """
@@ -189,9 +191,9 @@ class LOBDataset:
 
     def _scale_train_only(self) -> None:
         assert (
-            self._train is not None
-            and self._val is not None
-            and self._test is not None
+                self._train is not None
+                and self._val is not None
+                and self._test is not None
         )
         rlog("[bold magenta]Fitting MinMaxScaler on train split.[/bold magenta]")
         self._train = self.scaler.fit_transform(self._train)
@@ -199,10 +201,10 @@ class LOBDataset:
         self._test = self.scaler.transform(self._test)
 
     def _windowize(
-        self,
-        data: NDArray[np.float32],
-        seq_len: int,
-        shuffle_windows: bool
+            self,
+            data: NDArray[np.float32],
+            seq_len: int,
+            shuffle_windows: bool
     ) -> NDArray[np.float32]:
         n_samples, n_features = data.shape
         n_windows = n_samples - seq_len + 1
@@ -220,9 +222,9 @@ class LOBDataset:
         if split == "train":
             return self._train  # type: ignore[return-value]
         if split == "val":
-            return self._val    # type: ignore[return-value]
+            return self._val  # type: ignore[return-value]
         if split == "test":
-            return self._test   # type: ignore[return-value]
+            return self._test  # type: ignore[return-value]
         raise ValueError("split must be 'train', 'val' or 'test'")
 
     def _render_summary(self) -> None:
@@ -236,8 +238,8 @@ class LOBDataset:
 
         splits_for_view = [
             ("train", counts(self._train)),
-            ("val",   counts(self._val)),
-            ("test",  counts(self._test)),
+            ("val", counts(self._val)),
+            ("test", counts(self._test)),
         ]
 
         dataset_summary(
@@ -250,9 +252,9 @@ class LOBDataset:
 
 
 def batch_generator(
-    data: NDArray[np.float32],
-    time: Optional[NDArray[np.int32]],
-    batch_size: int,
+        data: NDArray[np.float32],
+        time: Optional[NDArray[np.int32]],
+        batch_size: int,
 ) -> Tuple[NDArray[np.float32], NDArray[np.int32]]:
     """
     Random mini-batch generator for windowed sequences.
@@ -287,6 +289,7 @@ def batch_generator(
         T_mb = time[idx].astype(np.int32, copy=False)
 
     return data_mb, T_mb
+
 
 def load_data(arg: Namespace) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """

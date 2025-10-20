@@ -14,9 +14,11 @@ from src.helpers.constants import DATA_DIR, TRAIN_TEST_SPLIT, ORDERBOOK_FILENAME
 try:
     # tolerate alternates if present in your helpers
     from src.helpers.constants import ORDERBOOK_FILENAME as _OB_ALT
+
     ORDERBOOK_DEFAULT = _OB_ALT
 except Exception:
     ORDERBOOK_DEFAULT = ORDERBOOK_FILENAME
+
 
 class DataOptions:
     """
@@ -70,6 +72,7 @@ class DataOptions:
         )
 
         return ns
+
 
 class ModulesOptions:
     """
@@ -134,6 +137,7 @@ class ModulesOptions:
         )
         return ns
 
+
 class Options:
     """
     Top-level options that *route* anything after `--dataset` to DatasetOptions.
@@ -142,6 +146,7 @@ class Options:
         opts = Options().parse()
         ds = opts.dataset  # Namespace from DatasetOptions
     """
+
     def __init__(self) -> None:
         parser = ArgumentParser(
             prog="timeganlob",
@@ -170,7 +175,6 @@ class Options:
         self._parser = parser
 
     def parse(self, argv: Optional[List[str]] = None) -> Namespace:
-
         # raw tokens (exclude program name)
         tokens: List[str] = list(sys.argv[1:] if argv is None else argv)
 
@@ -209,4 +213,3 @@ class Options:
 if __name__ == "__main__":
     opts = Options().parse()
     print(opts)
-

@@ -1,17 +1,20 @@
 from __future__ import annotations
+
 from typing import Iterable, Literal, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
-import matplotlib.pyplot as plt
 
 Metric = Literal["spread", "mpr"]
 
+
 def extract_seq_lengths(
-    sequences: Iterable[NDArray[np.floating]]
+        sequences: Iterable[NDArray[np.floating]]
 ) -> Tuple[NDArray[np.int32], int]:
     lengths = np.asarray([int(s.shape[0]) for s in sequences], dtype=np.int32)
     return lengths, int(lengths.max(initial=0))
+
 
 def sample_noise(
         batch_size: int,
@@ -38,10 +41,11 @@ def sample_noise(
 
     return out
 
+
 def minmax_scale(
-    data: NDArray[np.floating],
-    epsilon: float = 1e-7
-)-> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+        data: NDArray[np.floating],
+        epsilon: float = 1e-7
+) -> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     if data.ndim != 3:
         raise ValueError(f"Expected data with 3 dimensions [N, T, F], got shape {data.shape}")
 
@@ -52,10 +56,11 @@ def minmax_scale(
     norm = (data.astype(np.float32) - fmin) / (denom + epsilon)
     return norm, fmin, fmax
 
+
 def minmax_inverse(
-    norm: NDArray[np.floating],
-    fmin: NDArray[np.floating],
-    fmax: NDArray[np.floating],
+        norm: NDArray[np.floating],
+        fmin: NDArray[np.floating],
+        fmax: NDArray[np.floating],
 ) -> NDArray[np.float32]:
     """
     Inverse of `minmax_scale`.
@@ -71,6 +76,7 @@ def minmax_inverse(
     fmin = np.asarray(fmin, dtype=np.float32)
     fmax = np.asarray(fmax, dtype=np.float32)
     return norm.astype(np.float32) * (fmax - fmin) + fmin
+
 
 def _spread(series: NDArray[np.floating]) -> NDArray[np.float64]:
     """
@@ -93,6 +99,7 @@ def _midprice_returns(series: NDArray[np.floating]) -> NDArray[np.float64]:
     mid = np.clip(mid, a_min=np.finfo(np.float64).tiny, a_max=None)
     r = np.log(mid[1:]) - np.log(mid[:-1])
     return r.astype(np.float64)
+
 
 def kl_divergence_hist(
         real: NDArray[np.floating],
