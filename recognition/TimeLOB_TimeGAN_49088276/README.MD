@@ -266,7 +266,7 @@ python npy_to_csv.py \
 | Flag          | Type      | Default  | Description                                 | Example                        |
 |---------------|-----------|----------|---------------------------------------------|--------------------------------|
 | `--seed`      | int       | `42`     | Global random seed.                         | `--seed 1337`                  |
-| `--run-name`  | str       | `"exp1"` | Label for the run; used in logs/artifacts.  | `--run-name lob_amzn_l10`      |
+| `--run-name`  | str       | `"exp1"` | Label for the run; used in logs/artefacts.  | `--run-name lob_amzn_l10`      |
 | `--dataset …` | namespace | —        | Tokens after this go to **DataOptions**.    | `--dataset --seq-len 128 …`    |
 | `--modules …` | namespace | —        | Tokens after this go to **ModulesOptions**. | `--modules --batch-size 128 …` |
 
@@ -307,7 +307,8 @@ python npy_to_csv.py \
 We use the **LOBSTER** limit order book for **AMZN** at **level 10** depth. The primary file is
 `AMZN_2012-06-21_34200000_57600000_orderbook_10.csv` containing 40 columns
 `[ask_price_1, ask_size_1, …, ask_price_10, ask_size_10, bid_price_1, bid_size_1, …, bid_price_10, bid_size_10]`.
-Place the file under `data/`. By default the code performs a **chronological** split into train, validation, and test to
+Place the file under `data/`. By default, the code performs a **chronological** split into train, validation, and test
+to
 avoid leakage across time.
 
 Example depth visualizations are produced during evaluation as heatmaps in `outs/` for SSIM checks.
@@ -374,40 +375,14 @@ Heatmaps and metrics are saved to `outs/` via the training hooks and `src/helper
 
 ## Model Architecture
 
-TimeGAN combines **embedding-based autoencoding** and **adversarial sequence modeling** within a unified framework.
+TimeGAN combines **embedding-based autoencoding** and **adversarial sequence modelling** within a unified framework.
 All components communicate through a shared latent space $H_t$ that captures temporal dependencies in the limit order
 book (LOB) while preserving feature-level structure. Real sequences $X_t$ are first embedded into this latent
 representation, which supports both reconstruction and generation paths.
 The architecture ensures that temporal dynamics are learned in latent space, while supervision and adversarial losses
 align generated data with true market statistics.
 
-<style>
-  .figure {
-    margin: 2rem auto;
-    max-width: 900px;            /* container max width */
-    padding: 0 1rem;
-  }
-  .figure img {
-    display: block;
-    width: 100%;
-    height: auto;
-    max-width: 700px;            /* cap the image width */
-    margin: 0 auto;              /* center the image */
-    border-radius: 8px;
-  }
-  .figure figcaption {
-    margin-top: 0.75rem;
-    font-size: 0.95rem;
-    line-height: 1.45;
-    color: #555;
-    text-align: center;
-  }
-  @media (prefers-color-scheme: dark) {
-    .figure figcaption { color: #c9c9c9; }
-  }
-</style>
-
-<figure class="figure">
+<figure>
   <img src="assets/model-architecture.png" alt="TimeGAN block diagram and training scheme">
   <figcaption>
     <strong>Figure 1.</strong>
@@ -459,7 +434,7 @@ align generated data with true market statistics.
    S(H) = \sigma\big(S^{\text{gru}} W*{\text{sup}} + b_{\text{sup}}\big).
    $$
    The objective $ \mathcal{L}*{\text{sup}} = \tfrac{1}{B(T-1)d}\sum*{t=1}^{T-1}|H_{:,t+1,:} - S(H)_{:,t,:}|_2^2 $
-   encourages realistic one step dynamics. During generation, the same supervisor regularizes (E), so synthetic
+   encourages realistic one-step dynamics. During generation, the same supervisor regularizes (E), so synthetic
    trajectories inherit temporal structure observed in data.
 
 5. **Discriminator**
@@ -473,7 +448,7 @@ operates alongside Encoder, Recovery, Generator, and Supervisor that **all share
 with hidden size `hidden_dim` and depth `num_layer`, followed by a **per-time-step linear head** to the target
 dimensionality (`d` for latent, `F` for features, `1` for logits).
 All tensors use the shape **[batch, seq_len, channels]**, and weights use **Xavier** initialization for input matrices
-and **orthogonal** initialization for recurrent matrices to maintain stable sequence modeling.
+and **orthogonal** initialization for recurrent matrices to maintain stable sequence modelling.
 
 ### Data Flow
 
@@ -537,7 +512,7 @@ This configuration learns both the distributional properties of spreads and midp
 of depth evolution, producing synthetic LOB sequences that are comparable to real data under the project’s KL and SSIM
 targets.
 
-## Training Processes
+## Training Process
 
 The model was trained to prioritize stability, efficiency, and temporal consistency while working within modest hardware
 limits. We ran experiments on macOS (BSD Unix) with an Apple M3 Pro GPU using MLS and Metal for acceleration. The code
@@ -545,7 +520,7 @@ path was kept platform neutral so runs can be reproduced on Linux without changi
 the reconstruction loss and the adversarial loss to stable plateaus while keeping latent trajectories smooth across
 time, so the generator does not produce jittery or drifting sequences.
 
-Training followed the standard three phase TimeGAN schedule. First, we pretrained the encoder and recovery to minimize
+Training followed the standard three-phase TimeGAN schedule. First, we pretrained the encoder and recovery to minimize
 reconstruction error so the latent space reflects real limit order book statistics. Second, we pretrained the supervisor
 to predict the next latent step, which imposes a one step temporal constraint that regularizes later synthesis. Third,
 we switched to joint optimization of the generator, supervisor, and discriminator with a composite objective that mixes
@@ -586,16 +561,78 @@ For monitoring, we track **KL divergence** between real and synthetic distributi
 *heatmaps** from
 real and synthetic sequences and compute **SSIM**, which captures spatial coherency of price–level depth patterns.
 Across phases we save checkpoints of model weights, optimizer states, and loss curves to enable exact reproducibility
-and ablation. With this setup the synthetic sequences match the **distributional behavior** and **temporal dynamics** of
+and ablation. With this setup the synthetic sequences match the **distributional behaviour** and **temporal dynamics**
+of
 the held–out data, meeting the targets **KL ≤ 0.1** and **SSIM > 0.6** on the test split.
 
 ## Results
 
 ## Analysis of Performance Metrics
 
+<figure>
+  <img src="assets/training-losses.png" alt="Training loss curves for Generator and Discriminator" width="1334">
+  <figcaption>
+    <strong>Figure 2.</strong>
+    Training loss curves for generator and discriminator across epochs. The mid-training plateau reflects a balanced adversarial game, while late-epoch divergence matches the visual artefacts seen in samples.
+  </figcaption>
+</figure>
+
+The loss curves indicate broadly stable convergence, but with intermittent episodes where the generator loss peaks too
+high or dips too low. These swings usually occur when the discriminator briefly gains an edge, and the generator
+overcorrects. The behaviour suggests the schedule is close to stable, yet could benefit from finer learning rate or loss
+weight tuning to damp spikes without slowing progress.
+
+Distributional metrics confirm the picture. KL on spread sits around 2.2970, 3.0994, 3.5033, 2.3189, and 2.2062 for the
+sampled runs, which shows the model compresses wide-spread regimes and underrepresents best-level separation. KL on
+midprice returns is lower at 0.4999, 0.4285, 0.4641, 0.4194, and 0.4550, meaning the return shape is closer but still
+smoother than the real tails. With a bit more optimization or training for longer, these divergences would likely
+decrease, although pushing more epochs increases the risk of overfitting to specific market intervals.
+
+Temporal structure is strong. Temporal consistency is near zero for all samples (about 0.0004, 0.0002, −0.0030, −0.0027,
+−0.0016), which indicates the model preserves realistic step-to-step changes rather than introducing artificial
+short-horizon correlations. Latent distance remains small (roughly 0.0104, 0.0088, 0.0097, 0.0100, 0.0092), which shows
+generated trajectories stay close to the learned manifold without collapsing or drifting.
+
+Overall, the synthetic LOBs succeed at maintaining coherent level stacks, realistic depth variation over time, and
+smooth mid-price evolution; their temporal behaviour aligns well with the held-out data, and the latent representations
+remain compact and well-behaved. They fall short in spread regimes, which are too narrow with wide-spread events
+underexpressed, reflected in the elevated KL on spread; return distributions are close but still conservative in the
+tails. To improve, we can increase the weight on dynamics that affect best ask and best bid, add a modest spread-aware
+penalty or a curriculum that upweights rare wide-spread intervals, and expose more volatile slices during sampling;
+small adjustments to loss weights or learning-rate scheduling should reduce loss spikes and improve distributional
+fidelity while preserving the demonstrated temporal and latent strengths.
+
 ## Style Space and Plot Discussion
 
 ## References
+
+[1] J. Yoon, D. Jarrett, and M. van der Schaar, “Time-series Generative Adversarial Networks,” in *Advances in Neural
+Information Processing Systems (NeurIPS)*, 2019.
+Available: [https://papers.nips.cc/paper/8789-time-series-generative-adversarial-networks](https://papers.nips.cc/paper/8789-time-series-generative-adversarial-networks)
+
+[2] J. Yoon, “Codebase for ‘Time-series Generative Adversarial Networks (TimeGAN)’,” GitHub repository, 2019.
+Available: [https://github.com/jsyoon0823/TimeGAN](https://github.com/jsyoon0823/TimeGAN)
+
+[3] K. Jain, N. Firoozye, J. Kochems, and P. Treleaven, *Limit Order Book Simulations: A Review*, University College
+London, 2023.
+
+[4] K. Xu *et al.*, “Multi-Level Order-Flow Imbalance in a Limit Order Book,” *arXiv preprint* arXiv:1907.06230, 2019.
+Available: [https://arxiv.org/abs/1907.06230](https://arxiv.org/abs/1907.06230)
+
+[5] LOBSTER, “High-frequency limit order book data for research.”
+Available: [https://lobsterdata.com/](https://lobsterdata.com/)
+
+[6] DataCamp, “What is Normalization in Machine Learning? A Comprehensive Guide to Data Rescaling,” 2024.
+Available: [https://www.datacamp.com/tutorial/normalization-in-machine-learning](https://www.datacamp.com/tutorial/normalization-in-machine-learning)
+
+[7] D. P. Kingma and J. Ba, “Adam: A Method for Stochastic Optimization,” *arXiv preprint* arXiv:1412.6980, 2015.
+Available: [https://arxiv.org/abs/1412.6980](https://arxiv.org/abs/1412.6980)
+
+[8] X. Glorot and Y. Bengio, “Understanding the Difficulty of Training Deep Feedforward Neural Networks,” in *Proc. 13th
+Int. Conf. Artificial Intelligence and Statistics (AISTATS)*, 2010.
+
+[9] PyTorch, “PyTorch Documentation: Autograd, Initialization, and Distributed Training (`torchrun`),” 2025.
+Available: [https://pytorch.org/docs/](https://pytorch.org/docs/)
 
 ## Citation
 
