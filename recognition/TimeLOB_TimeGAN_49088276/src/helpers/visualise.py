@@ -5,6 +5,7 @@ Refactored to be faster, cleaner, and compatible with the new modules/utils.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,11 +13,21 @@ from numpy.typing import NDArray
 from skimage.util import img_as_float
 from skimage.metrics import structural_similarity as ssim
 
-from args import Options
-from constants import NUM_LEVELS
+# use nested CLI options + constants from src.helpers
+from src.helpers.args import Options
+from src.helpers.constants import OUTPUT_DIR, NUM_LEVELS
+from src.helpers.richie import log as rlog, status as rstatus, rule as rrule
+
 from src.dataset import load_data
-from src.helpers.constants import OUTPUT_DIR
 from src.modules import TimeGAN
+
+# optional pretty table for SSIM results (graceful fallback if rich unavailable)
+try:
+    from rich.table import Table
+    from rich import box
+    _HAS_RICH_TABLE = True
+except Exception:
+    _HAS_RICH_TABLE = False
 
 
 def get_ssim(img1_path: Path | str, img2_path: Path | str) -> float:
@@ -37,12 +48,12 @@ def get_ssim(img1_path: Path | str, img2_path: Path | str) -> float:
 
 
 def plot_heatmap(
-        data_2d: NDArray,  # shape [T, F]
-        *,
-        title: str | None = None,
-        save_path: Path | str | None = None,
-        show: bool = True,
-        dpi: int = 150,
+    data_2d: NDArray,  # shape [T, F]
+    *,
+    title: str | None = None,
+    save_path: Path | str | None = None,
+    show: bool = True,
+    dpi: int = 150,
 ) -> None:
     """
     Scatter-based depth heatmap.
@@ -56,15 +67,15 @@ def plot_heatmap(
     # slice views
     # for each level L: price indices = 4*L + (0 for ask, 2 for bid)
     # vol indices = price_idx + 1
-    prices_ask  = np.stack([data_2d[:, 4 * L + 0] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    vols_ask    = np.stack([data_2d[:, 4 * L + 1] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    prices_bid  = np.stack([data_2d[:, 4 * L + 2] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
-    vols_bid    = np.stack([data_2d[:, 4 * L + 3] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    prices_ask = np.stack([data_2d[:, 4 * L + 0] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    vols_ask   = np.stack([data_2d[:, 4 * L + 1] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    prices_bid = np.stack([data_2d[:, 4 * L + 2] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+    vols_bid   = np.stack([data_2d[:, 4 * L + 3] for L in range(NUM_LEVELS)], axis=1)  # [T, L]
+
     # Normalise volumes for alpha
-    max_vol = float(max(vols_ask.max(), vols_bid.max()))
+    max_vol = float(max(prices_ask.size and vols_ask.max(), prices_bid.size and vols_bid.max()))
     if not np.isfinite(max_vol) or max_vol <= 0:
         max_vol = 1.0
-
     a_ask = (vols_ask / max_vol).astype(np.float32)
     a_bid = (vols_bid / max_vol).astype(np.float32)
 
@@ -77,18 +88,24 @@ def plot_heatmap(
     y_bid = prices_bid.astype(np.float32).ravel()
 
     # colors rgba
-    c_ask = np.stack([
-        np.full_like(y_ask, 0.99),  # r
-        np.full_like(y_ask, 0.05),  # g
-        np.full_like(y_ask, 0.05),  # b
-        a_ask.astype(np.float32).ravel(),  # A
-    ], axis=1)
-    c_bid = np.stack([
-        np.full_like(y_ask, 0.05),  # r
-        np.full_like(y_ask, 0.05),  # g
-        np.full_like(y_ask, 0.99),  # b
-        a_bid.astype(np.float32).ravel(),  # A
-    ], axis=1)
+    c_ask = np.stack(
+        [
+            np.full_like(y_ask, 0.99),  # r
+            np.full_like(y_ask, 0.05),  # g
+            np.full_like(y_ask, 0.05),  # b
+            a_ask.astype(np.float32).ravel(),  # A
+        ],
+        axis=1,
+    )
+    c_bid = np.stack(
+        [
+            np.full_like(y_ask, 0.05),  # r
+            np.full_like(y_ask, 0.05),  # g
+            np.full_like(y_ask, 0.99),  # b
+            a_bid.astype(np.float32).ravel(),  # A
+        ],
+        axis=1,
+    )
 
     # limits
     pmin = float(min(prices_ask.min(), prices_bid.min()))
@@ -114,28 +131,69 @@ def plot_heatmap(
     plt.close(fig)
 
 
-if "__main__" == __name__:
+def _print_ssim_table(rows: List[Tuple[str, float]]) -> None:
+    """Pretty-print SSIM results if rich is available; fall back to logs."""
+    if _HAS_RICH_TABLE:
+        table = Table(title="SSIM: Real vs Synthetic", header_style="bold", box=box.SIMPLE_HEAVY)
+        table.add_column("Sample")
+        table.add_column("SSIM", justify="right")
+        for k, v in rows:
+            table.add_row(k, f"{v:.4f}")
+        # use richie's rule/log if available
+        rrule()
+        # `rlog` prints line-wise; here we directly print the table via rich's console if available
+        try:
+            from rich.console import Console
+            Console().print(table)
+        except Exception:
+            # fallback to logging lines
+            for k, v in rows:
+                rlog(f"SSIM({k}) = {v:.4f}")
+        rrule()
+    else:
+        rlog("SSIM: Real vs Synthetic")
+        for k, v in rows:
+            rlog(f"  {k:<16} {v:.4f}")
+
+
+if __name__ == "__main__":
+    rrule("[bold cyan]Heatmaps & SSIM[/bold cyan]")
+
     # cli
     top = Options().parse()
 
     # data
-    train, val, test = load_data(top.dataset)
-    # flatten windowed val/test ([N,T,F] -> [T',F]) for viz/metrics
-    if getattr(val, "ndim", None) == 3:
-        val = val.reshape(-1, val.shape[-1])
-    if getattr(test, "ndim", None) == 3:
-        test = test.reshape(-1, test.shape[-1])
+    with rstatus("[cyan]Loading data…"):
+        train, val, test = load_data(top.dataset)
+        # flatten windowed val/test ([N,T,F] -> [T',F]) for viz/metrics
+        if getattr(val, "ndim", None) == 3:
+            val = val.reshape(-1, val.shape[-1])
+        if getattr(test, "ndim", None) == 3:
+            test = test.reshape(-1, test.shape[-1])
+
+    rlog(f"Splits: train_w={train.shape}  val={getattr(val, 'shape', None)}  test={getattr(test, 'shape', None)}")
 
     # model (load weights)
-    model = TimeGAN(top.modules, train, val, test, load_weights=True)
+    with rstatus("[cyan]Restoring TimeGAN checkpoint…"):
+        model = TimeGAN(top.modules, train, val, test, load_weights=True)
 
     # real heatmap from test data
     real_path = OUTPUT_DIR / "real.png"
-    plot_heatmap(test, title="Real LOB Depth", save_path=real_path, show=False)
+    with rstatus("[cyan]Rendering real heatmap…"):
+        plot_heatmap(test, title="Real LOB Depth", save_path=real_path, show=False)
+    rlog(f"Saved: {real_path}")
 
+    # generate and compare a few samples
+    scores: List[Tuple[str, float]] = []
     for i in range(3):
-        synth = model.generate(num_rows=len(test))
+        with rstatus(f"[cyan]Sampling synthetic #{i}…"):
+            synth = model.generate(num_rows=int(test.shape[0]))
         synth_path = OUTPUT_DIR / f"synthetic_heatmap_{i}.png"
-        plot_heatmap(synth, title=f"Synthetic LOB Depth #{i}", save_path=synth_path, show=False)
+        with rstatus(f"[cyan]Rendering synthetic heatmap #{i}…"):
+            plot_heatmap(synth, title=f"Synthetic LOB Depth #{i}", save_path=synth_path, show=False)
         score = get_ssim(real_path, synth_path)
-        print(f"SSIM(real, synthetic_{i}) = {score:.4f}")
+        scores.append((f"synthetic_{i}", score))
+        rlog(f"SSIM(real, synthetic_{i}) = {score:.4f}  [{synth_path.name}]")
+
+    _print_ssim_table(scores)
+    rrule("[bold green]Done[/bold green]")
