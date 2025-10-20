@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # Project: TimeGAN (LOB / time-series)
 # Description: Reproducible environment for training, evaluation, and visualization
-# Maintainer: Radhesh Goel (Keys-I) <add-your-email-here>
+# Maintainer: Radhesh Goel (Keys-I)
 # Created: 2025-11-10
 # Python: 3.13
 # Notes:
@@ -26,6 +26,7 @@ dependencies:
   - scipy
   - scikit-learn
   - scikit-image
+  - seaborn
   - matplotlib
   - jupyterlab
   - ipykernel

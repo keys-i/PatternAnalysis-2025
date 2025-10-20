@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-from typing import Iterable, Literal, Tuple
+from pathlib import Path
+from typing import Iterable, Literal, Tuple, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+from skimage.metrics import structural_similarity as ssim
+from skimage.util import img_as_float
 
 Metric = Literal["spread", "mpr"]
 
 
-def extract_seq_lengths(sequences: Iterable[NDArray[np.floating]]) -> Tuple[NDArray[np.int32], int]:
+def extract_seq_lengths(
+    sequences: Iterable[NDArray[np.floating]],
+) -> Tuple[NDArray[np.int32], int]:
     lengths = np.asarray([int(s.shape[0]) for s in sequences], dtype=np.int32)
     return lengths, int(lengths.max(initial=0))
 
@@ -44,7 +49,9 @@ def minmax_scale(
     data: NDArray[np.floating], epsilon: float = 1e-7
 ) -> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     if data.ndim != 3:
-        raise ValueError(f"Expected data with 3 dimensions [N, T, F], got shape {data.shape}")
+        raise ValueError(
+            f"Expected data with 3 dimensions [N, T, F], got shape {data.shape}"
+        )
 
     fmin = np.min(data, axis=(0, 1)).astype(np.float32)
     fmax = np.max(data, axis=(0, 1)).astype(np.float32)
@@ -81,7 +88,9 @@ def _spread(series: NDArray[np.floating]) -> NDArray[np.float64]:
     columns: best ask at index 0 and best bid at index 2.
     """
     if series.ndim != 2 or series.shape[1] < 3:
-        raise ValueError("Expected shape [T, >=3]; columns 0 (ask) and 2 (bid) required.")
+        raise ValueError(
+            "Expected shape [T, >=3]; columns 0 (ask) and 2 (bid) required."
+        )
     return (series[:, 0] - series[:, 2]).astype(np.float64)
 
 
@@ -90,7 +99,9 @@ def _midprice_returns(series: NDArray[np.floating]) -> NDArray[np.float64]:
     Compute log midprice returns from a 2D array [T, F] with ask at 0 and bid at 2.
     """
     if series.ndim != 2 or series.shape[1] < 3:
-        raise ValueError("Expected shape [T, >=3]; columns 0 (ask) and 2 (bid) required.")
+        raise ValueError(
+            "Expected shape [T, >=3]; columns 0 (ask) and 2 (bid) required."
+        )
     mid = 0.5 * (series[:, 0] + series[:, 2])
     # avoid log(0)
     mid = np.clip(mid, a_min=np.finfo(np.float64).tiny, a_max=None)
@@ -149,3 +160,48 @@ def kl_divergence_hist(
 
     # numerical guard: KL should be >= 0
     return float(max(kl, 0.0))
+
+
+def get_ssim(img1_path: Path | str, img2_path: Path | str) -> float:
+    """Compute SSIM between two image files."""
+    img1 = img_as_float(plt.imread(str(img1_path)))
+    img2 = img_as_float(plt.imread(str(img2_path)))
+    if img1.ndim == 2:
+        img1 = img1[..., None]
+    if img2.ndim == 2:
+        img2 = img2[..., None]
+    return float(ssim(img1, img2, channel_axis=2, data_range=1.0))
+
+
+def get_kl_metrics(
+    real_2d: NDArray, fake_2d: NDArray, bins: int = 100
+) -> Dict[str, float]:
+    """Compute KL divergence for spread and midprice returns."""
+    T = min(len(real_2d), len(fake_2d))
+    real, fake = real_2d[:T], fake_2d[:T]
+    kl_spread = kl_divergence_hist(real, fake, metric="spread", bins=bins)
+    kl_mpr = kl_divergence_hist(real, fake, metric="mpr", bins=bins)
+    return {"spread": float(kl_spread), "midprice_returns": float(kl_mpr)}
+
+
+def temporal_consistency(real: NDArray, fake: NDArray) -> float:
+    """Measure correlation of successive deltas across time."""
+
+    def deltas(x):
+        return np.diff(x, axis=0)
+
+    real_d, fake_d = deltas(real), deltas(fake)
+    corr = np.mean(
+        [
+            np.corrcoef(real_d[:, i], fake_d[:, i])[0, 1]
+            for i in range(min(real_d.shape[1], fake_d.shape[1]))
+        ]
+    )
+    return float(np.nan_to_num(corr))
+
+
+def latent_divergence(real: NDArray, fake: NDArray) -> float:
+    """Compute simple L2 divergence between latent trajectories."""
+    return float(
+        np.linalg.norm(real[: len(fake)] - fake[: len(real)], ord="fro") / len(fake)
+    )
