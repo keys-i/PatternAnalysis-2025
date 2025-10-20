@@ -13,50 +13,56 @@ mirror that shape. Advanced regularization utilities and training helpers are
 included near the bottom of the file.
 
 Exports:
-    - Embedder
+    - Encoder
     - Recovery
     - Generator
     - Supervisor
     - Discriminator
     - TimeGAN
-    - TemporalBackboneConfig
+    - TemporalBackboneConfig (placeholder for future use)
 
 Created By: Radhesh Goel (Keys-I)
 ID: s49088276
-
-References:
-- 
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple, runtime_checkable, Protocol, cast
+from typing import Optional, Tuple, Protocol, runtime_checkable, cast, List, Dict
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from numpy.typing import NDArray
 from torch import Tensor
+from tqdm.auto import tqdm  # pretty progress bars
 
 from src.dataset import batch_generator
 from src.helpers.constants import (
     WEIGHTS_DIR,
     OUTPUT_DIR,
     NUM_TRAINING_ITERATIONS,
-    VALIDATE_INTERVAL
+    VALIDATE_INTERVAL,
 )
-from src.helpers.utils import minmax_scale, sample_noise, kl_divergence_hist, minmax_inverse
+# richie: centralized pretty CLI helpers (safe fallbacks inside)
+from src.helpers.richie import log as rlog, status as rstatus, rule as rrule
+from src.helpers.utils import (
+    minmax_scale,
+    sample_noise,
+    kl_divergence_hist,
+    minmax_inverse,
+)
 
 
 def get_device() -> torch.device:
     if torch.cuda.is_available():
-        return torch.device('cuda')
+        return torch.device("cuda")
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return torch.device('mps')
-    return torch.device('cpu')
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def set_seed(seed: Optional[int]):
@@ -65,6 +71,7 @@ def set_seed(seed: Optional[int]):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+    # Leave non-deterministic algos for perf by default; toggle if needed.
     torch.use_deterministic_algorithms(False)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -189,7 +196,7 @@ class Discriminator(nn.Module):
             num_layers=num_layers,
             batch_first=True,
         )
-        # note: No sigmoid here; BCEWithLogitsLoss expects raw logits
+        # Note: No sigmoid here; BCEWithLogitsLoss expects raw logits
         self.proj = nn.Linear(hidden_dim, 1)
         self.apply(xavier_gru_init)
 
@@ -197,6 +204,59 @@ class Discriminator(nn.Module):
         d, _ = self.rnn(h)
         # produce a logit per timestep
         return self.proj(d)
+
+
+@dataclass
+class TrainingHistory:
+    er_iters: List[int] = field(default_factory=list)
+    er_vals:  List[float] = field(default_factory=list)
+
+    s_iters: List[int] = field(default_factory=list)
+    s_vals:  List[float] = field(default_factory=list)
+
+    g_iters: List[int] = field(default_factory=list)
+    g_vals:  List[float] = field(default_factory=list)
+
+    d_iters: List[int] = field(default_factory=list)
+    d_vals:  List[float] = field(default_factory=list)
+
+    kl_iters: List[int] = field(default_factory=list)
+    kl_vals:  List[float] = field(default_factory=list)
+
+    def add_er(self, it: int, v: float) -> None: self.er_iters.append(it); self.er_vals.append(v)
+    def add_s (self, it: int, v: float) -> None: self.s_iters.append(it); self.s_vals.append(v)
+    def add_g (self, it: int, v: float) -> None: self.g_iters.append(it); self.g_vals.append(v)
+    def add_d (self, it: int, v: float) -> None: self.d_iters.append(it); self.d_vals.append(v)
+    def add_kl(self, it: int, v: float) -> None: self.kl_iters.append(it); self.kl_vals.append(v)
+
+    def save_plots(self, out_dir: Path, total_iters: int) -> Dict[str, Path]:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        saved: Dict[str, Path] = {}
+
+        # Training losses
+        fig, ax = plt.subplots(figsize=(9, 5))
+        if self.er_iters: ax.plot(self.er_iters, self.er_vals, label="Recon (E,R)")
+        if self.s_iters:  ax.plot(self.s_iters,  self.s_vals,  label="Supervisor (S)")
+        if self.g_iters:  ax.plot(self.g_iters,  self.g_vals,  label="Generator (G)")
+        if self.d_iters:  ax.plot(self.d_iters,  self.d_vals,  label="Discriminator (D)")
+        ax.set_title("Training Losses vs Iteration")
+        ax.set_xlabel("Iteration"); ax.set_ylabel("Loss")
+        ax.set_xlim(1, max([total_iters, *self.er_iters, *self.s_iters, *self.g_iters, *self.d_iters] or [total_iters]))
+        ax.legend(loc="best"); fig.tight_layout()
+        p1 = out_dir / "training_curves.png"; fig.savefig(p1, dpi=150, bbox_inches="tight"); plt.close(fig)
+        saved["training_curves"] = p1
+
+        # KL(spread)
+        if self.kl_iters:
+            fig, ax = plt.subplots(figsize=(9, 3.5))
+            ax.plot(self.kl_iters, self.kl_vals, marker="o", linewidth=1)
+            ax.set_title("Validation KL(spread) vs Iteration")
+            ax.set_xlabel("Iteration"); ax.set_ylabel("KL(spread)")
+            ax.set_xlim(1, max(self.kl_iters)); fig.tight_layout()
+            p2 = out_dir / "kl_spread_curve.png"; fig.savefig(p2, dpi=150, bbox_inches="tight"); plt.close(fig)
+            saved["kl_spread_curve"] = p2
+
+        return saved
 
 
 @dataclass
@@ -219,6 +279,7 @@ class OptLike(Protocol):
     beta1: float
     w_gamma: float
     w_g: float
+
 
 class TimeGAN:
     """
@@ -246,7 +307,7 @@ class TimeGAN:
         self.n_layers: int = opt.num_layer
 
         # schedule
-        self.num_iterations = NUM_TRAINING_ITERATIONS
+        self.num_iterations = int(getattr(opt, "num_iters", NUM_TRAINING_ITERATIONS))
         self.validate_interval = VALIDATE_INTERVAL
 
         # scale train only; keep stats for inverse
@@ -254,7 +315,7 @@ class TimeGAN:
         self.val = val_data
         self.test = test_data
 
-        # build modules
+        # build modules (E/R operate on feature dimension)
         feat_dim = int(self.train_norm.shape[-1])
         self.netE = Encoder(feat_dim, self.h_dim, self.n_layers).to(self.device)
         self.netR = Recovery(self.h_dim, feat_dim, self.n_layers).to(self.device)
@@ -274,12 +335,26 @@ class TimeGAN:
         self.optS = optim.Adam(self.netS.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
         self.optD = optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 
+        self.history = TrainingHistory()
         # load
         if load_weights:
             self._maybe_load()
 
+        # initial banner
+        rrule("[bold cyan]TimeGAN • init[/bold cyan]")
+        rlog(f"device={self.device}  "
+             f"batch_size={self.batch_size} seq_len={self.seq_len} z_dim={self.z_dim} "
+             f"h_dim={self.h_dim} n_layers={self.n_layers} num_iters={self.num_iterations}")
+        rlog(f"train_norm={self.train_norm.shape}  val={self.val.shape}  test={self.test.shape}")
+
+    # small utility for smooth progress readouts
+    @staticmethod
+    def _ema(prev: Optional[float], x: float, alpha: float = 0.1) -> float:
+        return x if prev is None else (1 - alpha) * prev + alpha * x
+
     @staticmethod
     def _ckpt_path() -> Path:
+        # NOTE: these are Paths from constants; ensure they are Path objects
         out = OUTPUT_DIR / WEIGHTS_DIR
         out.mkdir(parents=True, exist_ok=True)
         return out / "timegan_ckpt.pt"
@@ -287,35 +362,47 @@ class TimeGAN:
     def _maybe_load(self) -> None:
         path = self._ckpt_path()
         if not path.exists():
+            rlog("[yellow]Checkpoint not found; starting fresh.[/yellow]")
             return
-        state = torch.load(path, map_location=self.device)
-        self.netE.load_state_dict(state["netE"])
-        self.netR.load_state_dict(state["netR"])
-        self.netG.load_state_dict(state["netG"])
-        self.netS.load_state_dict(state["netS"])
-        self.netD.load_state_dict(state["netD"])
-        self.optE.load_state_dict(state["optE"])
-        self.optR.load_state_dict(state["optR"])
-        self.optG.load_state_dict(state["optG"])
-        self.optS.load_state_dict(state["optS"])
-        self.optD.load_state_dict(state["optD"])
+        with rstatus("[cyan]Loading checkpoint…"):
+            state = torch.load(path, map_location=self.device)
+            self.netE.load_state_dict(state["netE"])
+            self.netR.load_state_dict(state["netR"])
+            self.netG.load_state_dict(state["netG"])
+            self.netS.load_state_dict(state["netS"])
+            self.netD.load_state_dict(state["netD"])
+            self.optE.load_state_dict(state["optE"])
+            self.optR.load_state_dict(state["optR"])
+            self.optG.load_state_dict(state["optG"])
+            self.optS.load_state_dict(state["optS"])
+            self.optD.load_state_dict(state["optD"])
+        rlog("[green]Checkpoint loaded.[/green]")
 
-    def _save(self) -> None:
-        torch.save(
-            {
-                "netE": self.netE.state_dict(),
-                "netR": self.netR.state_dict(),
-                "netG": self.netG.state_dict(),
-                "netS": self.netS.state_dict(),
-                "netD": self.netD.state_dict(),
-                "optE": self.optE.state_dict(),
-                "optR": self.optR.state_dict(),
-                "optG": self.optG.state_dict(),
-                "optS": self.optS.state_dict(),
-                "optD": self.optD.state_dict(),
-            },
-            self._ckpt_path(),
-        )
+    def _save(self, *, with_history: bool = False) -> None:
+        with rstatus("[cyan]Saving checkpoint…"):
+            torch.save(
+                {
+                    "netE": self.netE.state_dict(),
+                    "netR": self.netR.state_dict(),
+                    "netG": self.netG.state_dict(),
+                    "netS": self.netS.state_dict(),
+                    "netD": self.netD.state_dict(),
+                    "optE": self.optE.state_dict(),
+                    "optR": self.optR.state_dict(),
+                    "optG": self.optG.state_dict(),
+                    "optS": self.optS.state_dict(),
+                    "optD": self.optD.state_dict(),
+                },
+                self._ckpt_path(),
+            )
+
+            if with_history and hasattr(self, "history") and self.history is not None:
+                # save plots
+                paths = self.history.save_plots(OUTPUT_DIR, total_iters=self.num_iterations)
+                for k, p in paths.items():
+                    rlog(f"[green]Saved {k} → {p}[/green]")
+
+        rlog("[green]Checkpoint saved.[/green]")
 
     def _to_device(self, *t: torch.Tensor) -> Tuple[torch.Tensor, ...]:
         return tuple(x.to(self.device, non_blocking=True) for x in t)
@@ -394,50 +481,79 @@ class TimeGAN:
         return float(loss.detach().cpu())
 
     def train_model(self) -> None:
+        rrule("[bold magenta]TimeGAN • training[/bold magenta]")
+        history = TrainingHistory()
+
         # phase 1: encoder-recovery pretrain
-        for it in range(self.num_iterations):
+        er_ema: Optional[float] = None
+        for it in tqdm(range(self.num_iterations), desc="Phase 1 • Pretrain (E,R)", unit="it"):
             x, _T = batch_generator(self.train_norm, None, self.batch_size)  # T unused
             x = torch.as_tensor(x, dtype=torch.float32)
             (x,) = self._to_device(x)
             er = self._pretrain_er_step(x)
-            if (it + 1) % max(1, self.validate_interval // 2) == 0:
-                pass  # keep output quiet by default
+            self.history.add_er(it + 1, er)
+
+            er_ema = self._ema(er, er)
+            er_ema = self._ema(er_ema, er)
+            if (it + 1) % 10 == 0:
+                rlog(f"[Pretrain] it={it + 1:,}  recon={er:.4f}  recon_ema={er_ema:.4f}")
 
         # phase 2: supervisor
-        for it in range(self.num_iterations):
+        sup_ema: Optional[float] = None
+        for it in tqdm(range(self.num_iterations), desc="Phase 2 • Supervisor (S)", unit="it"):
             x, _T = batch_generator(self.train_norm, None, self.batch_size)
             x = torch.as_tensor(x, dtype=torch.float32)
             (x,) = self._to_device(x)
             s = self._supervised_step(x)
+            self.history.add_s(it + 1, s)
+
+            sup_ema = self._ema(sup_ema, s)
+            if (it + 1) % 10 == 0:
+                rlog(f"[Supervised] it={it + 1:,}  s_loss={s:.4f}  s_ema={sup_ema:.4f}")
 
         # phase 3: joint training
-        for it in range(self.num_iterations):
+        g_ema: Optional[float] = None
+        d_ema: Optional[float] = None
+        for it in tqdm(range(self.num_iterations), desc="Phase 3 • Joint (G/S/D)", unit="it"):
             x, _T = batch_generator(self.train_norm, None, self.batch_size)
             z = sample_noise(self.batch_size, self.z_dim, self.seq_len)
             x = torch.as_tensor(x, dtype=torch.float32)
             z = torch.as_tensor(z, dtype=torch.float32)
             x, z = self._to_device(x, z)
 
-            # 2× G/ER per 1× D, as in popular settings
+            # 2× G/ER per 1× D
             for _ in range(2):
-                self._generator_step(x, z)
+                g_loss = self._generator_step(x, z)
+                self.history.add_g(it + 1, g_loss)
+
+                g_ema = self._ema(g_ema, g_loss)
                 # light ER refine pass
                 self._pretrain_er_step(x)
-            self._discriminator_step(x, z)
+            d_loss = self._discriminator_step(x, z)
+            self.history.add_d(it + 1, d_loss)
+
+            d_ema = self._ema(d_ema, d_loss)
 
             if (it + 1) % self.validate_interval == 0:
                 # quick KL check on a small synthetic sample (optional)
                 try:
                     fake = self.generate(num_rows=min(len(self.val), 4096), mean=0.0, std=1.0)
-                    # simple guards if val has enough columns
                     if self.val.shape[1] >= 3 and fake.shape[1] >= 3:
-                        _ = kl_divergence_hist(self.val[: len(fake)], fake, metric="spread")
+                        kl = kl_divergence_hist(self.val[: len(fake)], fake, metric="spread")
+                    else:
+                        kl = float("nan")
                 except Exception:
-                    pass
+                    kl = float("nan")
+                    self.history.add_kl(it+1, kl)
                 self._save()
+                rlog(
+                    f"[Joint] it={it + 1:,}  G={g_loss:.4f} (ema={g_ema:.4f})  "
+                    f"D={d_loss:.4f} (ema={d_ema:.4f})  KL(spread)={kl:.4g}"
+                )
 
         # final save
-        self._save()
+        self._save(with_history=True)
+        rrule("[bold green]TimeGAN • training complete[/bold green]")
 
     @torch.no_grad()
     def generate(
@@ -452,7 +568,6 @@ class TimeGAN:
         Steps: sample enough [B,T,F] windows → pass through G→S→R →
         inverse-scale with train min/max → flatten to [num_rows, F].
         """
-
         assert num_rows > 0
         windows_needed = math.ceil(num_rows / self.seq_len)
         z = sample_noise(
@@ -474,6 +589,7 @@ class TimeGAN:
         return x_hat_np.astype(np.float32, copy=False)
 
     def print_parameter_count(self) -> None:
+        rrule("[bold cyan]Parameter counts[/bold cyan]")
         sub = {
             "Encoder": self.netE,
             "Recovery": self.netR,
@@ -481,8 +597,7 @@ class TimeGAN:
             "Supervisor": self.netS,
             "Discriminator": self.netD,
         }
-
         for name, m in sub.items():
             total = sum(p.numel() for p in m.parameters())
             train = sum(p.numel() for p in m.parameters() if p.requires_grad)
-            print(f"Parameters for {name}: total={total:,} trainable={train:,}")
+            rlog(f"[white]{name:<13}[/white] total={total:,}  trainable={train:,}")

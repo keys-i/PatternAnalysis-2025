@@ -9,7 +9,7 @@ from typing import Optional, List
 
 import numpy as np
 
-from src.helpers.constants import DATA_DIR, TRAIN_TEST_SPLIT, ORDERBOOK_FILENAME
+from src.helpers.constants import DATA_DIR, TRAIN_TEST_SPLIT, ORDERBOOK_FILENAME, NUM_TRAINING_ITERATIONS
 
 try:
     # tolerate alternates if present in your helpers
@@ -110,6 +110,9 @@ class ModulesOptions:
         parser.add_argument("--w-g", type=float, default=1.0,
                             help="Generator adversarial loss weight (g).")
 
+        parser.add_argument("--num-iters", type=int, default=NUM_TRAINING_ITERATIONS,
+                            help="Number of training iterations per phase (ER, S, Joint).")
+
         self._parser = parser
 
     def parse(self, argv: Optional[List[str]]) -> Namespace:
@@ -127,6 +130,7 @@ class ModulesOptions:
             beta1=m.beta1,
             w_gamma=m.w_gamma,
             w_g=m.w_g,
+            num_iters=m.num_iters,
         )
         return ns
 
