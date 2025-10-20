@@ -1,6 +1,24 @@
+# ------------------------------------------------------------------------------
+# Project: TimeGAN (LOB / time-series)
+# Description: Reproducible environment for training, evaluation, and visualization
+# Maintainer: Radhesh Goel (Keys-I) <add-your-email-here>
+# Created: 2025-11-10
+# Python: 3.13
+# Notes:
+# - Keep versions loosely pinned unless you need strict reproducibility.
+# - Use `conda env export --from-history` to capture only explicit deps later.
+# ------------------------------------------------------------------------------
 name: timegan
+
 channels:
   - conda-forge
+
+variables:
+  PROJECT_NAME: "timegan"
+  PYTHONHASHSEED: "0"
+  MPLBACKEND: "Agg"
+  TORCH_SHOW_CPP_STACKTRACES: "1"
+
 dependencies:
   - python=3.13
   - numpy
@@ -15,7 +33,14 @@ dependencies:
   - torchvision
   - pillow
   - tqdm
+  - rich
+  - contextvars
   - typing-extensions
   - pip
   - pip:
-      - # add any repo-specific pip deps here if need
+
+# Notes:
+# - `contextvars` is built into Python 3.12; no backport needed.
+# - If you need GPU on Linux with CUDA 12.x, install these AFTER creating the env:
+#     conda install pytorch-cuda=12.1 -c nvidia -c conda-forge
+#   (Keep pytorch/torchvision versions as above to maintain ABI compatibility.)

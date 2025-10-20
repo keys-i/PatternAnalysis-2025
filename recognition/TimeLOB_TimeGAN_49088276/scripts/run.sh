@@ -9,19 +9,20 @@
 #SBATCH --partition=a100
 #SBATCH --job-name=timegan-turing
 
-# conda init
-# conda env create -f environment.yml
-# conda activate timegan
+ conda init
+ conda env create -f environment.yml
+ conda activate timegan
 
-cd ..
 export PROJECT_ROOT="$PWD"
 export PYTHONPATH="$PWD"
 
-python src/train.py \
+pwd
+
+python -m src.train \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \
-    --orderbook-filename AMZN_2012-06-21_10_orderbook_10.csv \
+    --orderbook-filename orderbook_10.csv \
     --splits 0.7 0.85 1.0 \
     --no-shuffle \
   --modules \
@@ -32,14 +33,26 @@ python src/train.py \
     --lr 1e-4 \
     --beta1 0.5 \
     --w-gamma 1.0 \
-    --w-g 1.0
+    --w-g 1.0 \
+    --num-iter 100
 
-python src/predict.py \
+python -m src.predict \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \
-    --orderbook-filename AMZN_2012-06-21_10_orderbook_10.csv \
+    --orderbook-filename orderbook_10.csv \
     --splits 0.7 0.85 1.0 \
+  --modules \
+    --batch-size 128 \
+    --z-dim 40 \
+    --hidden-dim 64 \
+    --num-layer 3
+
+python -m src.helpers.visualise  \
+  --dataset \
+    --seq-len 128 \
+    --data-dir ./data \
+    --orderbook-filename orderbook_10.csv \
   --modules \
     --batch-size 128 \
     --z-dim 40 \
