@@ -1,15 +1,21 @@
 """
 Options for the entire model
 """
+
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser, Namespace, REMAINDER
-from typing import Optional, List
+from argparse import REMAINDER, ArgumentParser, Namespace
+from typing import List, Optional
 
 import numpy as np
 
-from src.helpers.constants import DATA_DIR, TRAIN_TEST_SPLIT, ORDERBOOK_FILENAME, NUM_TRAINING_ITERATIONS
+from src.helpers.constants import (
+    DATA_DIR,
+    NUM_TRAINING_ITERATIONS,
+    ORDERBOOK_FILENAME,
+    TRAIN_TEST_SPLIT,
+)
 
 try:
     # tolerate alternates if present in your helpers
@@ -35,16 +41,17 @@ class DataOptions:
         )
         parser.add_argument("--seq-len", type=int, default=128)
         parser.add_argument("--data-dir", dest="data_dir", type=str, default=str(DATA_DIR))
-        parser.add_argument("--orderbook-filename", dest="orderbook_filename", type=str, default=ORDERBOOK_FILENAME)
         parser.add_argument(
-            "--no-shuffle",
-            action="store_true",
-            help="Disable shuffling of windowed sequences"
+            "--orderbook-filename", dest="orderbook_filename", type=str, default=ORDERBOOK_FILENAME
         )
         parser.add_argument(
-            "--keep-zero-rows", dest="keep_zero_rows",
+            "--no-shuffle", action="store_true", help="Disable shuffling of windowed sequences"
+        )
+        parser.add_argument(
+            "--keep-zero-rows",
+            dest="keep_zero_rows",
             action="store_true",
-            help="Do NOT filter rows containing zeros."
+            help="Do NOT filter rows containing zeros.",
         )
         parser.add_argument(
             "--splits",
@@ -92,29 +99,46 @@ class ModulesOptions:
         )
         # core shapes
         parser.add_argument("--batch-size", type=int, default=128)
-        parser.add_argument("--seq-len", type=int, default=128,
-                            help="Sequence length (kept here for convenience to sync with data).")
-        parser.add_argument("--z-dim", type=int, default=40,
-                            help="Latent/input feature dim (e.g., LOB feature count).")
-        parser.add_argument("--hidden-dim", type=int, default=64,
-                            help="Module hidden size.")
-        parser.add_argument("--num-layer", type=int, default=3,
-                            help="Number of stacked layers per RNN/TCN block.")
+        parser.add_argument(
+            "--seq-len",
+            type=int,
+            default=128,
+            help="Sequence length (kept here for convenience to sync with data).",
+        )
+        parser.add_argument(
+            "--z-dim",
+            type=int,
+            default=40,
+            help="Latent/input feature dim (e.g., LOB feature count).",
+        )
+        parser.add_argument("--hidden-dim", type=int, default=64, help="Module hidden size.")
+        parser.add_argument(
+            "--num-layer", type=int, default=3, help="Number of stacked layers per RNN/TCN block."
+        )
 
         # optimizer
-        parser.add_argument("--lr", type=float, default=1e-4,
-                            help="Learning rate (generator/supervisor/discriminator if shared).")
-        parser.add_argument("--beta1", type=float, default=0.5,
-                            help="Adam beta1.")
+        parser.add_argument(
+            "--lr",
+            type=float,
+            default=1e-4,
+            help="Learning rate (generator/supervisor/discriminator if shared).",
+        )
+        parser.add_argument("--beta1", type=float, default=0.5, help="Adam beta1.")
 
         # Loss weights
-        parser.add_argument("--w-gamma", type=float, default=1.0,
-                            help="Supervisor loss weight (γ).")
-        parser.add_argument("--w-g", type=float, default=1.0,
-                            help="Generator adversarial loss weight (g).")
+        parser.add_argument(
+            "--w-gamma", type=float, default=1.0, help="Supervisor loss weight (γ)."
+        )
+        parser.add_argument(
+            "--w-g", type=float, default=1.0, help="Generator adversarial loss weight (g)."
+        )
 
-        parser.add_argument("--num-iters", type=int, default=NUM_TRAINING_ITERATIONS,
-                            help="Number of training iterations per phase (ER, S, Joint).")
+        parser.add_argument(
+            "--num-iters",
+            type=int,
+            default=NUM_TRAINING_ITERATIONS,
+            help="Number of training iterations per phase (ER, S, Joint).",
+        )
 
         self._parser = parser
 
@@ -149,8 +173,7 @@ class Options:
 
     def __init__(self) -> None:
         parser = ArgumentParser(
-            prog="timeganlob",
-            description="TimeGAN-LOB entrypoint with nested dataset options."
+            prog="timeganlob", description="TimeGAN-LOB entrypoint with nested dataset options."
         )
         parser.add_argument("--seed", type=int, default=42, help="Global random seed")
         parser.add_argument("--run-name", type=str, default="exp1", help="Run name")
@@ -183,7 +206,7 @@ class Options:
             if flag not in toks:
                 return [], toks
             i = toks.index(flag)
-            rest = toks[i + 1:]
+            rest = toks[i + 1 :]
             # stop at the next section flag (or end)
             next_indices = [j for j, t in enumerate(rest) if t in ("--dataset", "--modules")]
             end = next_indices[0] if next_indices else len(rest)

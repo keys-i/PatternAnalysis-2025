@@ -24,12 +24,13 @@ Exports:
 Created By: Radhesh Goel (Keys-I)
 ID: s49088276
 """
+
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple, Protocol, runtime_checkable, cast, List, Dict
+from typing import Dict, List, Optional, Protocol, Tuple, cast, runtime_checkable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,18 +43,21 @@ from tqdm.auto import tqdm  # pretty progress bars
 
 from src.dataset import batch_generator
 from src.helpers.constants import (
-    WEIGHTS_DIR,
-    OUTPUT_DIR,
     NUM_TRAINING_ITERATIONS,
+    OUTPUT_DIR,
     VALIDATE_INTERVAL,
+    WEIGHTS_DIR,
 )
+
 # richie: centralized pretty CLI helpers (safe fallbacks inside)
-from src.helpers.richie import log as rlog, status as rstatus, rule as rrule
+from src.helpers.richie import log as rlog
+from src.helpers.richie import rule as rrule
+from src.helpers.richie import status as rstatus
 from src.helpers.utils import (
-    minmax_scale,
-    sample_noise,
     kl_divergence_hist,
     minmax_inverse,
+    minmax_scale,
+    sample_noise,
 )
 
 
@@ -224,19 +228,24 @@ class TrainingHistory:
     kl_vals: List[float] = field(default_factory=list)
 
     def add_er(self, it: int, v: float) -> None:
-        self.er_iters.append(it); self.er_vals.append(v)
+        self.er_iters.append(it)
+        self.er_vals.append(v)
 
     def add_s(self, it: int, v: float) -> None:
-        self.s_iters.append(it); self.s_vals.append(v)
+        self.s_iters.append(it)
+        self.s_vals.append(v)
 
     def add_g(self, it: int, v: float) -> None:
-        self.g_iters.append(it); self.g_vals.append(v)
+        self.g_iters.append(it)
+        self.g_vals.append(v)
 
     def add_d(self, it: int, v: float) -> None:
-        self.d_iters.append(it); self.d_vals.append(v)
+        self.d_iters.append(it)
+        self.d_vals.append(v)
 
     def add_kl(self, it: int, v: float) -> None:
-        self.kl_iters.append(it); self.kl_vals.append(v)
+        self.kl_iters.append(it)
+        self.kl_vals.append(v)
 
     def save_plots(self, out_dir: Path, total_iters: int) -> Dict[str, Path]:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -244,18 +253,28 @@ class TrainingHistory:
 
         # Training losses
         fig, ax = plt.subplots(figsize=(9, 5))
-        if self.er_iters: ax.plot(self.er_iters, self.er_vals, label="Recon (E,R)")
-        if self.s_iters:  ax.plot(self.s_iters, self.s_vals, label="Supervisor (S)")
-        if self.g_iters:  ax.plot(self.g_iters, self.g_vals, label="Generator (G)")
-        if self.d_iters:  ax.plot(self.d_iters, self.d_vals, label="Discriminator (D)")
+        if self.er_iters:
+            ax.plot(self.er_iters, self.er_vals, label="Recon (E,R)")
+        if self.s_iters:
+            ax.plot(self.s_iters, self.s_vals, label="Supervisor (S)")
+        if self.g_iters:
+            ax.plot(self.g_iters, self.g_vals, label="Generator (G)")
+        if self.d_iters:
+            ax.plot(self.d_iters, self.d_vals, label="Discriminator (D)")
         ax.set_title("Training Losses vs Iteration")
-        ax.set_xlabel("Iteration");
+        ax.set_xlabel("Iteration")
         ax.set_ylabel("Loss")
-        ax.set_xlim(1, max([total_iters, *self.er_iters, *self.s_iters, *self.g_iters, *self.d_iters] or [total_iters]))
-        ax.legend(loc="best");
+        ax.set_xlim(
+            1,
+            max(
+                [total_iters, *self.er_iters, *self.s_iters, *self.g_iters, *self.d_iters]
+                or [total_iters]
+            ),
+        )
+        ax.legend(loc="best")
         fig.tight_layout()
-        p1 = out_dir / "training_curves.png";
-        fig.savefig(p1, dpi=150, bbox_inches="tight");
+        p1 = out_dir / "training_curves.png"
+        fig.savefig(p1, dpi=150, bbox_inches="tight")
         plt.close(fig)
         saved["training_curves"] = p1
 
@@ -264,12 +283,12 @@ class TrainingHistory:
             fig, ax = plt.subplots(figsize=(9, 3.5))
             ax.plot(self.kl_iters, self.kl_vals, marker="o", linewidth=1)
             ax.set_title("Validation KL(spread) vs Iteration")
-            ax.set_xlabel("Iteration");
+            ax.set_xlabel("Iteration")
             ax.set_ylabel("KL(spread)")
-            ax.set_xlim(1, max(self.kl_iters));
+            ax.set_xlim(1, max(self.kl_iters))
             fig.tight_layout()
-            p2 = out_dir / "kl_spread_curve.png";
-            fig.savefig(p2, dpi=150, bbox_inches="tight");
+            p2 = out_dir / "kl_spread_curve.png"
+            fig.savefig(p2, dpi=150, bbox_inches="tight")
             plt.close(fig)
             saved["kl_spread_curve"] = p2
 
@@ -304,12 +323,12 @@ class TimeGAN:
     """
 
     def __init__(
-            self,
-            opt: OptLike,
-            train_data: NDArray[np.float32],
-            val_data: NDArray[np.float32],
-            test_data: NDArray[np.float32],
-            load_weights: bool = False,
+        self,
+        opt: OptLike,
+        train_data: NDArray[np.float32],
+        val_data: NDArray[np.float32],
+        test_data: NDArray[np.float32],
+        load_weights: bool = False,
     ) -> None:
         # set seed & device
         set_seed(getattr(opt, "manualseed", getattr(opt, "seed", None)))
@@ -359,9 +378,11 @@ class TimeGAN:
 
         # initial banner
         rrule("[bold cyan]TimeGAN • init[/bold cyan]")
-        rlog(f"device={self.device}  "
-             f"batch_size={self.batch_size} seq_len={self.seq_len} z_dim={self.z_dim} "
-             f"h_dim={self.h_dim} n_layers={self.n_layers} num_iters={self.num_iterations}")
+        rlog(
+            f"device={self.device}  "
+            f"batch_size={self.batch_size} seq_len={self.seq_len} z_dim={self.z_dim} "
+            f"h_dim={self.h_dim} n_layers={self.n_layers} num_iters={self.num_iterations}"
+        )
         rlog(f"train_norm={self.train_norm.shape}  val={self.val.shape}  test={self.test.shape}")
 
     # small utility for smooth progress readouts
@@ -486,9 +507,9 @@ class TimeGAN:
         y_fake = self.netD(h_hat)
         y_fake_e = self.netD(e_hat)
         loss = (
-                self.bce_logits(y_real, torch.ones_like(y_real))
-                + self.bce_logits(y_fake, torch.zeros_like(y_fake))
-                + self.opt.w_gamma * self.bce_logits(y_fake_e, torch.zeros_like(y_fake_e))
+            self.bce_logits(y_real, torch.ones_like(y_real))
+            + self.bce_logits(y_fake, torch.zeros_like(y_fake))
+            + self.opt.w_gamma * self.bce_logits(y_fake_e, torch.zeros_like(y_fake_e))
         )
         # optional hinge to avoid overshooting
         if loss.item() > 0.15:
@@ -499,7 +520,6 @@ class TimeGAN:
 
     def train_model(self) -> None:
         rrule("[bold magenta]TimeGAN • training[/bold magenta]")
-        history = TrainingHistory()
 
         # phase 1: encoder-recovery pretrain
         er_ema: Optional[float] = None
@@ -574,11 +594,11 @@ class TimeGAN:
 
     @torch.no_grad()
     def generate(
-            self,
-            num_rows: int,
-            *,
-            mean: float = 0.0,
-            std: float = 1.0,
+        self,
+        num_rows: int,
+        *,
+        mean: float = 0.0,
+        std: float = 1.0,
     ) -> NDArray[np.float32]:
         """Generate exactly `num_rows` rows of synthetic data (2D array).
 

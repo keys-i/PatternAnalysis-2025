@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import contextvars
 from pathlib import Path
-from typing import Optional, Iterable, Tuple
+from typing import Iterable, Optional, Tuple
 
 try:
+    from rich import box
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
-    from rich import box
 
     _CONSOLE: Optional[Console] = Console()
 except Exception:  # fallback if rich isn’t installed
@@ -47,9 +47,11 @@ def status(msg: str):
 
     # nested: no-op
     class _Noop:
-        def __enter__(self): return None
+        def __enter__(self):
+            return None
 
-        def __exit__(self, exc_type, exc, tb): return False
+        def __exit__(self, exc_type, exc, tb):
+            return False
 
     return _Noop()
 
@@ -60,17 +62,19 @@ def rule(text: str = "") -> None:
 
 
 def dataset_summary(
-        *,
-        file_path: Path,
-        seq_len: int,
-        dtype_name: str,
-        filter_zero_rows: bool,
-        splits: Iterable[Tuple[str, Tuple[int, int]]],  # (name, (rows, windows))
+    *,
+    file_path: Path,
+    seq_len: int,
+    dtype_name: str,
+    filter_zero_rows: bool,
+    splits: Iterable[Tuple[str, Tuple[int, int]]],  # (name, (rows, windows))
 ) -> None:
     """Render a header + splits table."""
     if _CONSOLE is None:
         # Plain fallback
-        print(f"Dataset: {file_path} | seq_len={seq_len} | dtype={dtype_name} | filter_zero_rows={filter_zero_rows}")
+        print(
+            f"Dataset: {file_path} | seq_len={seq_len} | dtype={dtype_name} | filter_zero_rows={filter_zero_rows}"
+        )
         for name, (rows, wins) in splits:
             print(f"{name:>6}: rows={rows:,} windows={wins:,}")
         return

@@ -9,21 +9,19 @@ from numpy.typing import NDArray
 Metric = Literal["spread", "mpr"]
 
 
-def extract_seq_lengths(
-        sequences: Iterable[NDArray[np.floating]]
-) -> Tuple[NDArray[np.int32], int]:
+def extract_seq_lengths(sequences: Iterable[NDArray[np.floating]]) -> Tuple[NDArray[np.int32], int]:
     lengths = np.asarray([int(s.shape[0]) for s in sequences], dtype=np.int32)
     return lengths, int(lengths.max(initial=0))
 
 
 def sample_noise(
-        batch_size: int,
-        z_dim: int,
-        seq_len: int,
-        *,
-        mean: float | None = None,
-        std: float | None = None,
-        rng: np.random.Generator | None = None,
+    batch_size: int,
+    z_dim: int,
+    seq_len: int,
+    *,
+    mean: float | None = None,
+    std: float | None = None,
+    rng: np.random.Generator | None = None,
 ) -> NDArray[np.float32]:
     if rng is None:
         rng = np.random.default_rng()
@@ -43,8 +41,7 @@ def sample_noise(
 
 
 def minmax_scale(
-        data: NDArray[np.floating],
-        epsilon: float = 1e-7
+    data: NDArray[np.floating], epsilon: float = 1e-7
 ) -> Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     if data.ndim != 3:
         raise ValueError(f"Expected data with 3 dimensions [N, T, F], got shape {data.shape}")
@@ -58,9 +55,9 @@ def minmax_scale(
 
 
 def minmax_inverse(
-        norm: NDArray[np.floating],
-        fmin: NDArray[np.floating],
-        fmax: NDArray[np.floating],
+    norm: NDArray[np.floating],
+    fmin: NDArray[np.floating],
+    fmax: NDArray[np.floating],
 ) -> NDArray[np.float32]:
     """
     Inverse of `minmax_scale`.
@@ -102,13 +99,13 @@ def _midprice_returns(series: NDArray[np.floating]) -> NDArray[np.float64]:
 
 
 def kl_divergence_hist(
-        real: NDArray[np.floating],
-        fake: NDArray[np.floating],
-        metric: Literal["spread", "mpr"] = "spread",
-        *,
-        bins: int = 100,
-        show_plot: bool = False,
-        epsilon: float = 1e-12
+    real: NDArray[np.floating],
+    fake: NDArray[np.floating],
+    metric: Literal["spread", "mpr"] = "spread",
+    *,
+    bins: int = 100,
+    show_plot: bool = False,
+    epsilon: float = 1e-12,
 ) -> float:
     if real.ndim != 2 or fake.ndim != 2:
         raise ValueError("Inputs must be 2D arrays [T, F].")
@@ -133,8 +130,8 @@ def kl_divergence_hist(
     f_hist, _ = np.histogram(f_series, bins=edges, density=False)
 
     # convert to probability masses with smoothing
-    r_p = (r_hist.astype(np.float64) + epsilon)
-    f_p = (f_hist.astype(np.float64) + epsilon)
+    r_p = r_hist.astype(np.float64) + epsilon
+    f_p = f_hist.astype(np.float64) + epsilon
     r_p /= r_p.sum()
     f_p /= f_p.sum()
 

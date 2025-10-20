@@ -1,6 +1,7 @@
 """
 Configuration constants for the project.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,10 +35,7 @@ VALIDATE_INTERVAL = 300
 
 TRAIN_TEST_SPLIT = (0.7, 0.15, 0.15)
 assert isclose(
-    sum(TRAIN_TEST_SPLIT), 1.0,
-    rel_tol=0.0, abs_tol=1e-6
-), (
-    f"TRAIN_TEST_SPLIT must sum to 1.0 (got {sum(TRAIN_TEST_SPLIT):.8f})"
-)
+    sum(TRAIN_TEST_SPLIT), 1.0, rel_tol=0.0, abs_tol=1e-6
+), f"TRAIN_TEST_SPLIT must sum to 1.0 (got {sum(TRAIN_TEST_SPLIT):.8f})"
 
 NUM_LEVELS = 10

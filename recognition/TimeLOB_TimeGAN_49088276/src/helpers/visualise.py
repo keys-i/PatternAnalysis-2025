@@ -2,6 +2,7 @@
 Generate LOB depth heatmaps and compute SSIM between real vs synthetic images.
 Refactored to be faster, cleaner, and compatible with the new modules/utils.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,16 +15,19 @@ from skimage.metrics import structural_similarity as ssim
 from skimage.util import img_as_float
 
 from src.dataset import load_data
+
 # use nested CLI options + constants from src.helpers
 from src.helpers.args import Options
-from src.helpers.constants import OUTPUT_DIR, NUM_LEVELS
-from src.helpers.richie import log as rlog, status as rstatus, rule as rrule
+from src.helpers.constants import NUM_LEVELS, OUTPUT_DIR
+from src.helpers.richie import log as rlog
+from src.helpers.richie import rule as rrule
+from src.helpers.richie import status as rstatus
 from src.modules import TimeGAN
 
 # optional pretty table for SSIM results (graceful fallback if rich unavailable)
 try:
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
 
     _HAS_RICH_TABLE = True
 except Exception:
@@ -48,12 +52,12 @@ def get_ssim(img1_path: Path | str, img2_path: Path | str) -> float:
 
 
 def plot_heatmap(
-        data_2d: NDArray,  # shape [T, F]
-        *,
-        title: str | None = None,
-        save_path: Path | str | None = None,
-        show: bool = True,
-        dpi: int = 150,
+    data_2d: NDArray,  # shape [T, F]
+    *,
+    title: str | None = None,
+    save_path: Path | str | None = None,
+    show: bool = True,
+    dpi: int = 150,
 ) -> None:
     """
     Scatter-based depth heatmap.
@@ -144,6 +148,7 @@ def _print_ssim_table(rows: List[Tuple[str, float]]) -> None:
         # `rlog` prints line-wise; here we directly print the table via rich's console if available
         try:
             from rich.console import Console
+
             Console().print(table)
         except Exception:
             # fallback to logging lines
@@ -171,7 +176,9 @@ if __name__ == "__main__":
         if getattr(test, "ndim", None) == 3:
             test = test.reshape(-1, test.shape[-1])
 
-    rlog(f"Splits: train_w={train.shape}  val={getattr(val, 'shape', None)}  test={getattr(test, 'shape', None)}")
+    rlog(
+        f"Splits: train_w={train.shape}  val={getattr(val, 'shape', None)}  test={getattr(test, 'shape', None)}"
+    )
 
     # model (load weights)
     with rstatus("[cyan]Restoring TimeGAN checkpoint…"):

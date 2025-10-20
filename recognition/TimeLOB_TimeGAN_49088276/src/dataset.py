@@ -11,6 +11,7 @@ focuses on the essentials:
 
 Created By: Radhesh Goel (Keys-I)
 """
+
 from __future__ import annotations
 
 from argparse import Namespace
@@ -22,7 +23,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 from src.helpers.constants import DATA_DIR, ORDERBOOK_FILENAME, TRAIN_TEST_SPLIT
-from src.helpers.richie import log as rlog, status as rstatus, dataset_summary
+from src.helpers.richie import dataset_summary
+from src.helpers.richie import log as rlog
+from src.helpers.richie import status as rstatus
 
 
 class MinMaxScaler:
@@ -61,6 +64,7 @@ class DatasetConfig:
     """
     Configuration for loading and preprocessing order-book data.
     """
+
     seq_len: int
     data_dir: Path = DATA_DIR
     orderbook_filename: str = ORDERBOOK_FILENAME
@@ -99,7 +103,11 @@ class LOBDataset:
     def load(self) -> "LOBDataset":
         with rstatus("[bold cyan]Loading and preprocessing LOBSTER orderbook dataset..."):
             data = self._read_raw()
-            data = self._filter_unoccupied(data) if self.cfg.filter_zero_rows else data.astype(self.cfg.dtype)
+            data = (
+                self._filter_unoccupied(data)
+                if self.cfg.filter_zero_rows
+                else data.astype(self.cfg.dtype)
+            )
             self._filtered = data.astype(self.cfg.dtype)
 
             self._split_chronological()
@@ -116,7 +124,9 @@ class LOBDataset:
         data = self._select_split(split)
         return self._windowize(data, self.cfg.seq_len, self.cfg.shuffle_windows)
 
-    def dataset_windowed(self) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+    def dataset_windowed(
+        self,
+    ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
         """
         Return (train_w, val_w, test_w) as windowed arrays.
         """
@@ -190,21 +200,14 @@ class LOBDataset:
             )
 
     def _scale_train_only(self) -> None:
-        assert (
-                self._train is not None
-                and self._val is not None
-                and self._test is not None
-        )
+        assert self._train is not None and self._val is not None and self._test is not None
         rlog("[bold magenta]Fitting MinMaxScaler on train split.[/bold magenta]")
         self._train = self.scaler.fit_transform(self._train)
         self._val = self.scaler.transform(self._val)
         self._test = self.scaler.transform(self._test)
 
     def _windowize(
-            self,
-            data: NDArray[np.float32],
-            seq_len: int,
-            shuffle_windows: bool
+        self, data: NDArray[np.float32], seq_len: int, shuffle_windows: bool
     ) -> NDArray[np.float32]:
         n_samples, n_features = data.shape
         n_windows = n_samples - seq_len + 1
@@ -213,7 +216,7 @@ class LOBDataset:
 
         out = np.empty((n_windows, seq_len, n_features), dtype=self.cfg.dtype)
         for i in range(n_windows):
-            out[i] = data[i: i + seq_len]
+            out[i] = data[i : i + seq_len]
         if shuffle_windows:
             np.random.shuffle(out)
         return out
@@ -252,9 +255,9 @@ class LOBDataset:
 
 
 def batch_generator(
-        data: NDArray[np.float32],
-        time: Optional[NDArray[np.int32]],
-        batch_size: int,
+    data: NDArray[np.float32],
+    time: Optional[NDArray[np.int32]],
+    batch_size: int,
 ) -> Tuple[NDArray[np.float32], NDArray[np.int32]]:
     """
     Random mini-batch generator for windowed sequences.
@@ -291,7 +294,9 @@ def batch_generator(
     return data_mb, T_mb
 
 
-def load_data(arg: Namespace) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+def load_data(
+    arg: Namespace,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """
     Backwards-compatible wrapper.
     Returns:
