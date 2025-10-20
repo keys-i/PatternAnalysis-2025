@@ -13,8 +13,8 @@ ID: s49088276
 References:
 - 
 """
-from dataset import load_data
-from modules import TimeGAN
+from src.dataset import load_data
+from src.modules import TimeGAN
 from src.helpers.args import Options
 
 

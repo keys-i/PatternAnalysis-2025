@@ -23,10 +23,10 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset import load_data
-from helpers.args import Options
-from helpers.constants import OUTPUT_DIR
-from modules import TimeGAN
+from src.dataset import load_data
+from src.helpers.args import Options
+from src.helpers.constants import OUTPUT_DIR
+from src.modules import TimeGAN
 
 
 def main() -> None:
