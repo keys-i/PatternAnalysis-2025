@@ -267,7 +267,13 @@ class TrainingHistory:
         ax.set_xlim(
             1,
             max(
-                [total_iters, *self.er_iters, *self.s_iters, *self.g_iters, *self.d_iters]
+                [
+                    total_iters,
+                    *self.er_iters,
+                    *self.s_iters,
+                    *self.g_iters,
+                    *self.d_iters,
+                ]
                 or [total_iters]
             ),
         )
@@ -365,11 +371,21 @@ class TimeGAN:
         self.bce_logits = nn.BCEWithLogitsLoss()
 
         # optimizers
-        self.optE = optim.Adam(self.netE.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-        self.optR = optim.Adam(self.netR.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-        self.optG = optim.Adam(self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-        self.optS = optim.Adam(self.netS.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-        self.optD = optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+        self.optE = optim.Adam(
+            self.netE.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999)
+        )
+        self.optR = optim.Adam(
+            self.netR.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999)
+        )
+        self.optG = optim.Adam(
+            self.netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999)
+        )
+        self.optS = optim.Adam(
+            self.netS.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999)
+        )
+        self.optD = optim.Adam(
+            self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999)
+        )
 
         self.history = TrainingHistory()
         # load
@@ -383,7 +399,9 @@ class TimeGAN:
             f"batch_size={self.batch_size} seq_len={self.seq_len} z_dim={self.z_dim} "
             f"h_dim={self.h_dim} n_layers={self.n_layers} num_iters={self.num_iterations}"
         )
-        rlog(f"train_norm={self.train_norm.shape}  val={self.val.shape}  test={self.test.shape}")
+        rlog(
+            f"train_norm={self.train_norm.shape}  val={self.val.shape}  test={self.test.shape}"
+        )
 
     # small utility for smooth progress readouts
     @staticmethod
@@ -402,7 +420,7 @@ class TimeGAN:
         if not path.exists():
             rlog("[yellow]Checkpoint not found; starting fresh.[/yellow]")
             return
-        with rstatus("[cyan]Loading checkpoint…"):
+        with rstatus("[cyan]Loading checkpoint"):
             state = torch.load(path, map_location=self.device)
             self.netE.load_state_dict(state["netE"])
             self.netR.load_state_dict(state["netR"])
@@ -417,7 +435,7 @@ class TimeGAN:
         rlog("[green]Checkpoint loaded.[/green]")
 
     def _save(self, *, with_history: bool = False) -> None:
-        with rstatus("[cyan]Saving checkpoint…"):
+        with rstatus("[cyan]Saving checkpoint"):
             torch.save(
                 {
                     "netE": self.netE.state_dict(),
@@ -436,7 +454,9 @@ class TimeGAN:
 
             if with_history and hasattr(self, "history") and self.history is not None:
                 # save plots
-                paths = self.history.save_plots(OUTPUT_DIR, total_iters=self.num_iterations)
+                paths = self.history.save_plots(
+                    OUTPUT_DIR, total_iters=self.num_iterations
+                )
                 for k, p in paths.items():
                     rlog(f"[green]Saved {k} → {p}[/green]")
 
@@ -485,12 +505,19 @@ class TimeGAN:
         x_std = torch.std(x, dim=(0, 1), unbiased=False)
         xh_std = torch.std(x_hat, dim=(0, 1), unbiased=False)
         v1 = torch.mean(torch.abs(torch.sqrt(xh_std + 1e-6) - torch.sqrt(x_std + 1e-6)))
-        v2 = torch.mean(torch.abs(torch.mean(x_hat, dim=(0, 1)) - torch.mean(x, dim=(0, 1))))
+        v2 = torch.mean(
+            torch.abs(torch.mean(x_hat, dim=(0, 1)) - torch.mean(x, dim=(0, 1)))
+        )
 
         # supervised latent loss
         sup = self.mse(s_real[:, :-1, :], h_real[:, 1:, :])
 
-        loss = adv + self.opt.w_gamma * adv_e + self.opt.w_g * (v1 + v2) + torch.sqrt(sup + 1e-12)
+        loss = (
+            adv
+            + self.opt.w_gamma * adv_e
+            + self.opt.w_g * (v1 + v2)
+            + torch.sqrt(sup + 1e-12)
+        )
         self.optG.zero_grad()
         self.optS.zero_grad()
         loss.backward()
@@ -523,7 +550,9 @@ class TimeGAN:
 
         # phase 1: encoder-recovery pretrain
         er_ema: Optional[float] = None
-        for it in tqdm(range(self.num_iterations), desc="Phase 1 • Pretrain (E,R)", unit="it"):
+        for it in tqdm(
+            range(self.num_iterations), desc="Phase 1 • Pretrain (E,R)", unit="it"
+        ):
             x, _T = batch_generator(self.train_norm, None, self.batch_size)  # T unused
             x = torch.as_tensor(x, dtype=torch.float32)
             (x,) = self._to_device(x)
@@ -533,11 +562,15 @@ class TimeGAN:
             er_ema = self._ema(er, er)
             er_ema = self._ema(er_ema, er)
             if (it + 1) % 10 == 0:
-                rlog(f"[Pretrain] it={it + 1:,}  recon={er:.4f}  recon_ema={er_ema:.4f}")
+                rlog(
+                    f"[Pretrain] it={it + 1:,}  recon={er:.4f}  recon_ema={er_ema:.4f}"
+                )
 
         # phase 2: supervisor
         sup_ema: Optional[float] = None
-        for it in tqdm(range(self.num_iterations), desc="Phase 2 • Supervisor (S)", unit="it"):
+        for it in tqdm(
+            range(self.num_iterations), desc="Phase 2 • Supervisor (S)", unit="it"
+        ):
             x, _T = batch_generator(self.train_norm, None, self.batch_size)
             x = torch.as_tensor(x, dtype=torch.float32)
             (x,) = self._to_device(x)
@@ -551,7 +584,9 @@ class TimeGAN:
         # phase 3: joint training
         g_ema: Optional[float] = None
         d_ema: Optional[float] = None
-        for it in tqdm(range(self.num_iterations), desc="Phase 3 • Joint (G/S/D)", unit="it"):
+        for it in tqdm(
+            range(self.num_iterations), desc="Phase 3 • Joint (G/S/D)", unit="it"
+        ):
             x, _T = batch_generator(self.train_norm, None, self.batch_size)
             z = sample_noise(self.batch_size, self.z_dim, self.seq_len)
             x = torch.as_tensor(x, dtype=torch.float32)
@@ -574,9 +609,13 @@ class TimeGAN:
             if (it + 1) % self.validate_interval == 0:
                 # quick KL check on a small synthetic sample (optional)
                 try:
-                    fake = self.generate(num_rows=min(len(self.val), 4096), mean=0.0, std=1.0)
+                    fake = self.generate(
+                        num_rows=min(len(self.val), 4096), mean=0.0, std=1.0
+                    )
                     if self.val.shape[1] >= 3 and fake.shape[1] >= 3:
-                        kl = kl_divergence_hist(self.val[: len(fake)], fake, metric="spread")
+                        kl = kl_divergence_hist(
+                            self.val[: len(fake)], fake, metric="spread"
+                        )
                     else:
                         kl = float("nan")
                 except Exception:
@@ -585,7 +624,7 @@ class TimeGAN:
                 self._save()
                 rlog(
                     f"[Joint] it={it + 1:,}  G={g_loss:.4f} (ema={g_ema:.4f})  "
-                    f"D={d_loss:.4f} (ema={d_ema:.4f})  KL(spread)={kl:.4g}"
+                    f"D={d_loss:.4f} (ema={d_ema:.4f})  KL(spread)={kl:.5g}"
                 )
 
         # final save

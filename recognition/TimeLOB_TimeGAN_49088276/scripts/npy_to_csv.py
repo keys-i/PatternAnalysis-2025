@@ -41,7 +41,7 @@ def show_summary(df: pd.DataFrame, topk: int = 8) -> None:
         )
     console.print(table)
     if len(desc) > topk:
-        console.print(f"[dim]… {len(desc) - topk} more columns not shown[/dim]")
+        console.print(f"[dim] {len(desc) - topk} more columns not shown[/dim]")
 
 
 def main() -> None:
@@ -77,7 +77,7 @@ def main() -> None:
         console.print(f"[red]Input not found:[/red] {inp}")
         raise SystemExit(1)
 
-    with Status(f"[cyan]Loading[/cyan] {inp}…", console=console):
+    with Status(f"[cyan]Loading[/cyan] {inp}", console=console):
         arr = np.load(inp)
 
     if arr.ndim != 2:
@@ -100,7 +100,7 @@ def main() -> None:
 
     # Save CSV unless suppressed
     if not args.no - save:
-        with Status(f"[cyan]Writing CSV[/cyan] → {outp}…", console=console):
+        with Status(f"[cyan]Writing CSV[/cyan] → {outp}", console=console):
             df.to_csv(outp, index=False)
         console.print(f"[green]Done:[/green] wrote [bold]{outp}[/bold]")
 
