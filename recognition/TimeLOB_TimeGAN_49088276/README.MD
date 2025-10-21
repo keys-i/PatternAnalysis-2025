@@ -54,3 +54,73 @@ Training follows three phases. First, pretrain Encoder and Recovery to minimize 
 latent space to real LOB statistics. Second, train the Supervisor for next step prediction to align latent dynamics with
 empirical transitions. Third, run joint adversarial training with discriminator loss plus simple moment and consistency
 terms, yielding synthetic sequences that match real markets in distribution and temporal structure.
+
+## Table of Contents
+
+| #  | Section                                                             |
+|----|---------------------------------------------------------------------|
+| 1  | [Project Structure](#project-structure)                             |
+| 2  | [Dependencies](#dependencies)                                       |
+| 3  | [Usage](#usage)                                                     |
+| 4  | [Dataset](#dataset)                                                 |
+| 5  | [Data Setup](#data-setup)                                           |
+| 6  | [Model Architecture](#model-architecture)                           |
+| 7  | [Training Process](#training-process)                               |
+| 8  | [Results](#results)                                                 |
+| 9  | [Analysis of Performance Metrics](#analysis-of-performance-metrics) |
+| 10 | [Style Space and Plot Discussion](#style-space-and-plot-discussion) |
+| 11 | [References](#references)                                           |
+| 12 | [Citation](#citation)                                               |
+
+## Project Structure
+
+The project consists of the following file structure:
+
+```ansi
+TimeLOB_TimeGAN_49088276/
+├── README.MD                             # Project report (including configuration, setup, training methodology, performance evaluation)
+├── environment.yml                       # conda environment with all dependencies.
+├── scripts/
+│         ├── run.sh                      # rangpur/local script for running the project
+│         └── summarise_orderbook.py      # test script to get to know about the dataset
+└── src/
+    ├── dataset.py                        # data loader and preprocesser (includes data loading, scaling and normalising.)
+    ├── helpers/
+    │         ├── args.py                 # a nested options for the model and dataset so, those files are not bloated
+    │         ├── constants.py            # root-anchored paths, defaults and training constants
+    │         ├── richie.py               # a common interface for pretty console logging, status spinners, tables.
+    │         ├── utils.py                # metrics and utilities (KL, scaling, noise, specific feature calculators)
+    │         └── visualise.py            # plotting helpers for depth heatmaps, curves, and summaries (SSIM score calculators)
+    ├── modules.py                        # TimeGAN model components, training loops, checkpoints, metrics hooks.
+    ├── predict.py                        # Sampling script to generate synthetic LOB sequences from a checkpoint.
+    └── train.py                          # CLI entrypoint that parses options and runs training.
+```
+
+## Dependencies
+
+Training was carried out on **macOS (BSD Unix)** using an Apple M3 Pro system; the codebase is also compatible with
+Linux.
+Windows was not used for training.
+> **Note**
+> Hardware: Apple M3 Pro GPU with MLS/Metal support, o[environment.yml](environment.yml)r equivalent; at least 8 GB of
+> unified memory is advisable.
+
+| Dependency        | Suggested version | One-line use case                                                                         |
+|-------------------|------------------:|-------------------------------------------------------------------------------------------|
+| Python            |            3.13.9 | Runtime for training, sampling, evaluation scripts, and utilities.                        |
+| torch (PyTorch)   |             2.8.0 | Core framework for TimeGAN modules, tensor ops, autograd, and device acceleration.        |
+| torchvision       |            0.24.0 | Utility helpers (e.g., image save utilities) for exporting depth heatmaps when needed.    |
+| numpy             |             2.3.4 | Fast array math for windowing LOB data, metrics, and numerical transforms.                |
+| matplotlib        |            3.10.7 | Plots for training curves, spread/return histograms, and LOB depth heatmaps.              |
+| scikit-learn      |             1.7.2 | Analysis utilities (e.g., PCA/MI) in feature studies and ablations outside core training. |
+| scikit-image      |            0.25.2 | SSIM computation to compare real vs synthetic heatmaps.                                   |
+| tqdm              |            4.67.1 | Progress bars for three-phase training with periodic metric updates.                      |
+| contextvars       |               2.4 | Context-local state to keep logging and progress output tidy across workers.              |
+| rich              |            14.2.0 | Pretty console logs, status spinners, and summary tables during data prep and training.   |
+| typing-extensions |            4.15.0 | Modern typing features (Protocol, Literal) used in model and CLI code.                    |
+| scipy             |            1.16.3 | Statistical routines (e.g., Spearman correlation) for analysis scripts.                   |
+| pillow (PIL)      |            12.0.0 | Image IO/encoding backend for saving figures and heatmaps to PNG.                         |
+| pandas            |             2.3.3 | Tabular processing for order book summaries and feature engineering notebooks.            |
+| jupyterlab        |            4.4.10 | Interactive exploration of LOB data, metrics, and experiment reports.                     |
+| ipykernel         |             7.1.0 | Jupyter kernel to run notebooks for analysis and visualization.                           |
+
