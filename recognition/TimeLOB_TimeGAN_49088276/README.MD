@@ -124,3 +124,180 @@ Windows was not used for training.
 | jupyterlab        |            4.4.10 | Interactive exploration of LOB data, metrics, and experiment reports.                     |
 | ipykernel         |             7.1.0 | Jupyter kernel to run notebooks for analysis and visualization.                           |
 
+## Usage
+
+### Training
+
+Trains TimeGAN on AMZN level-10 LOBSTER windows with a three-phase schedule:
+
+1. **Encoder–Recovery** pretrain for reconstruction, 2) **Supervisor** pretrain for next-step consistency, 3) **Joint
+   adversarial
+   training** with moment matching. Periodic validation computes KL on spread and midprice returns; checkpoints are
+   saved
+   regularly and depth heatmaps can be rendered for SSIM checks.
+
+```bash
+# start training from scratch (nested CLI: dataset namespace then modules namespace)
+python src/train.py \
+  --dataset \
+    --seq-len 128 \
+    --data-dir ./data \
+    --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
+    --splits 0.7 0.85 1.0 \
+  --modules \
+    --batch-size 128 \
+    --z-dim 40 \
+    --hidden-dim 64 \
+    --num-layer 3 \
+    --lr 1e-4 \
+    --beta1 0.5 \
+    --num-iters 25000
+```
+
+| Hyperparameter         | Value             | Notes                                      |
+|------------------------|-------------------|--------------------------------------------|
+| batch size             | 128               | Larger batches stabilize adversarial steps |
+| `seq_len`              | 128               | Window length for LOB sequences            |
+| `z_dim`                | 40                | Matches raw10 feature count                |
+| `hidden_dim`           | 64                | GRU hidden size across components          |
+| `layers`               | 3                 | Stacked GRU depth                          |
+| `optimizer`            | Adam              | β1 tuned for GAN stability                 |
+| `learning rate`        | 1e-4              | Shared across E, R, G, S, D                |
+| β1                     | 0.5               | Momentum term for Adam                     |
+| `iterations per phase` | 25,000            | ER, Supervisor, and Joint phases each      |
+| scaling                | train-only MinMax | Fit on train split, apply to val/test      |
+
+- **Outputs**:
+    - `weights/timegan_ckpt.pt` (latest checkpoint)
+    - `outs/` (generated samples, KL/SSIM plots, training curves, summaries)
+
+### Generation
+
+The `predict.py` script samples synthetic LOB data from a trained **TimeGAN** checkpoint. It supports flat row
+generation, windowed generation, optional heatmap rendering, and quick metric checks.
+
+#### 1. Generate flat rows (match test length)
+
+Produces exactly `len(test)` rows in original feature space and saves as NumPy.
+
+```bash
+python -m src.predict \
+   --dataset \
+    --seq-len 128 \
+    --data-dir ./data \
+    --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
+    --splits 0.7 0.85 1.0 \
+   --modules \
+    --batch-size 128 \
+    --z-dim 40 \
+    --hidden-dim 64 \
+    --num-layer 3
+```
+
+#### 2. Generate a fixed number of rows
+
+Specify `--rows` to override the default.
+
+```bash
+python src/predict.py \
+  --dataset \
+    --seq-len 128 \
+    --data-dir ./data \
+    --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
+  --modules \
+    --batch-size 128 \
+    --z-dim 40 \
+    --hidden-dim 64 \
+    --num-layer 3
+```
+
+#### 3. Render depth heatmaps (real vs synthetic)
+
+Creates side-by-side heatmaps for SSIM inspection.
+
+```bash
+python -m src.viz.ssim_heatmap \
+  --dataset \
+    --seq-len 128 \
+    --data-dir ./data \
+    --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
+  --modules \
+    --batch-size 128 \
+     --z-dim 40 \
+     --hidden-dim 64 \
+     --num-layer 3
+# saves outs/real.png and outs/synthetic_heatmap_{i}.png
+```
+
+#### 4. Quick metrics (KL and SSIM)
+
+During generation or via post-hoc scripts you can compute:
+
+* **KL(spread)** and **KL(midprice returns)** on a held-out slice
+* **SSIM** between real and synthetic heatmaps
+
+```bash
+python src/helpers/visualise.py \
+  --dataset \
+    --seq-len 128 \
+    --data-dir ./data \
+    --orderbook-filename orderbook_10.csv \
+  --modules \
+    --batch-size 128 \
+    --z-dim 40 \
+    --hidden-dim 64 \
+    --num-layer 3
+```
+
+#### 5. Export to CSV
+
+```bash
+python npy_to_csv.py \
+  --in ./outs/gen_data.npy \
+  --out ./outs/gen_data.csv \
+  --peek 10 \
+  --summary
+```
+
+### Command-line Arguments
+
+#### Top-level (parsed by `Options`)
+
+| Flag          | Type      | Default  | Description                                 | Example                        |
+|---------------|-----------|----------|---------------------------------------------|--------------------------------|
+| `--seed`      | int       | `42`     | Global random seed.                         | `--seed 1337`                  |
+| `--run-name`  | str       | `"exp1"` | Label for the run; used in logs/artifacts.  | `--run-name lob_amzn_l10`      |
+| `--dataset …` | namespace | —        | Tokens after this go to **DataOptions**.    | `--dataset --seq-len 128 …`    |
+| `--modules …` | namespace | —        | Tokens after this go to **ModulesOptions**. | `--modules --batch-size 128 …` |
+
+#### Data options (parsed by `DataOptions`)
+
+| Flag                      | Type     | Default              | Description                                                               | Example                                        |
+|---------------------------|----------|----------------------|---------------------------------------------------------------------------|------------------------------------------------|
+| `--seq-len`               | int      | `128`                | Sliding window length for LOB sequences.                                  | `--seq-len 128`                                |
+| `--data-dir`              | str      | `DATA_DIR`           | Directory containing LOBSTER files.                                       | `--data-dir ./data`                            |
+| `--orderbook-filename`    | str      | `ORDERBOOK_FILENAME` | Name of `orderbook_10.csv`.                                               | `--orderbook-filename AMZN_…_orderbook_10.csv` |
+| `--no-shuffle`            | flag     | off                  | Disable shuffling of windowed sequences.                                  | `--no-shuffle`                                 |
+| `--keep-zero-rows`        | flag     | off                  | Do not filter rows with zeros.                                            | `--keep-zero-rows`                             |
+| `--splits TRAIN VAL TEST` | 3× float | `TRAIN_TEST_SPLIT`   | Proportions summing to ~1.0 or cumulative cutoffs (e.g., `0.7 0.85 1.0`). | `--splits 0.7 0.85 1.0`                        |
+
+#### Model/training options (parsed by `ModulesOptions`)
+
+| Flag           | Type  | Default                   | Description                                    | Example             |
+|----------------|-------|---------------------------|------------------------------------------------|---------------------|
+| `--batch-size` | int   | `128`                     | Batch size for all phases.                     | `--batch-size 128`  |
+| `--seq-len`    | int   | `128`                     | Mirror of data window length for convenience.  | `--seq-len 128`     |
+| `--z-dim`      | int   | `40`                      | Noise/latent input dimension.                  | `--z-dim 40`        |
+| `--hidden-dim` | int   | `64`                      | GRU hidden size across components.             | `--hidden-dim 64`   |
+| `--num-layer`  | int   | `3`                       | Stacked GRU layers per block.                  | `--num-layer 3`     |
+| `--lr`         | float | `1e-4`                    | Adam learning rate.                            | `--lr 1e-4`         |
+| `--beta1`      | float | `0.5`                     | Adam β1 for GAN stability.                     | `--beta1 0.5`       |
+| `--w-gamma`    | float | `1.0`                     | Weight on supervisor-related adversarial term. | `--w-gamma 1.0`     |
+| `--w-g`        | float | `1.0`                     | Weight on generator losses and moments.        | `--w-g 1.0`         |
+| `--num-iters`  | int   | `NUM_TRAINING_ITERATIONS` | Iterations per phase (ER, Supervisor, Joint).  | `--num-iters 25000` |
+
+**Outputs:**
+
+- `outs/gen_data.npy` flat synthetic rows `[T, F]` in original feature scale
+- `outs/real.png`, `outs/synthetic_heatmap_{i}.png` depth heatmaps for SSIM
+- Optional plots: `outs/kl_spread_curve.png`, `outs/training_curves.png` if enabled in training/eval scripts
