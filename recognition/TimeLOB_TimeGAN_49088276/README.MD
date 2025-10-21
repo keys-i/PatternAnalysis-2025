@@ -372,6 +372,179 @@ python src/train.py \
 
 Heatmaps and metrics are saved to `outs/` via the training hooks and `src/helpers/visualise`.
 
+## Model Architecture
+
+TimeGAN combines **embedding-based autoencoding** and **adversarial sequence modeling** within a unified framework.
+All components communicate through a shared latent space $H_t$ that captures temporal dependencies in the limit order
+book (LOB) while preserving feature-level structure. Real sequences $X_t$ are first embedded into this latent
+representation, which supports both reconstruction and generation paths.
+The architecture ensures that temporal dynamics are learned in latent space, while supervision and adversarial losses
+align generated data with true market statistics.
+
+<style>
+  .figure {
+    margin: 2rem auto;
+    max-width: 900px;            /* container max width */
+    padding: 0 1rem;
+  }
+  .figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 700px;            /* cap the image width */
+    margin: 0 auto;              /* center the image */
+    border-radius: 8px;
+  }
+  .figure figcaption {
+    margin-top: 0.75rem;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: #555;
+    text-align: center;
+  }
+  @media (prefers-color-scheme: dark) {
+    .figure figcaption { color: #c9c9c9; }
+  }
+</style>
+
+<figure class="figure">
+  <img src="assets/model-architecture.png" alt="TimeGAN block diagram and training scheme">
+  <figcaption>
+    <strong>Figure 1.</strong>
+    (a) Block diagram of TimeGAN components showing embedding, generation, and discrimination paths.
+    (b) Training scheme showing data flow (solid lines) and gradient flow (dashed lines) across
+    Encoder (e), Recovery (r), Generator (g), and Discriminator (d).
+  </figcaption>
+</figure>
+
+### Components
+
+1. **Encoder**
+   The encoder maps a scaled LOB window $X \in \mathbb{R}^{B\times T\times F}$ to a latent sequence $H \in
+   \mathbb{R}^{B\times T\times d}$. We use stacked GRUs to capture short and medium horizon dynamics, followed by a
+   linear projection and a pointwise sigmoid to keep activations bounded:
+   $$
+   H^{\text{gru}},_ = \mathrm{GRU}*{\text{enc}}(X),\qquad
+   H = \sigma\big(H^{\text{gru}} W*{\text{enc}} + b_{\text{enc}}\big).
+   $$
+   This path anchors the latent space to real microstructure so that latent transitions remain meaningful when we switch
+   to generation.
+
+2. **Recovery**
+   The recovery network decodes a latent sequence back to the original feature space. Given (H), it produces $\tilde X
+   \in \mathbb{R}^{B\times T\times F}$ through a GRU and a linear head with optional sigmoid:
+   $$
+   X^{\sim\text{gru}},_ = \mathrm{GRU}*{\text{rec}}(H),\qquad
+   \tilde X = \sigma\big(X^{\sim\text{gru}} W*{\text{rec}} + b_{\text{rec}}\big).
+   $$
+   Together, encoder and recovery minimize a reconstruction loss $ \mathcal{L}_{\text{rec}} = | \tilde X - X |_2^2 $,
+   which preserves price and depth structure and stabilizes later adversarial training.
+
+3. **Generator**
+   The generator produces a latent trajectory from noise $Z \in \mathbb{R}^{B\times T\times z}$. A GRU stack followed by
+   a projection yields $E \in \mathbb{R}^{B\times T\times d}$:
+   $$
+   E^{\text{gru}},_ = \mathrm{GRU}*{\text{gen}}(Z),\qquad
+   E = \sigma\big(E^{\text{gru}} W*{\text{gen}} + b_{\text{gen}}\big).
+   $$
+   We then pass (E) through the supervisor to enforce one step temporal consistency before decoding to synthetic
+   windows $\hat X$ via the recovery. Generating in latent space makes the adversarial game better conditioned than
+   operating directly on raw features.
+
+4. **Supervisor**
+   The supervisor learns the latent transition model. Given a real latent sequence (H), it predicts the next step (S(H))
+   using a GRU plus a projection:
+   $$
+   S^{\text{gru}},_ = \mathrm{GRU}*{\text{sup}}(H),\qquad
+   S(H) = \sigma\big(S^{\text{gru}} W*{\text{sup}} + b_{\text{sup}}\big).
+   $$
+   The objective $ \mathcal{L}*{\text{sup}} = \tfrac{1}{B(T-1)d}\sum*{t=1}^{T-1}|H_{:,t+1,:} - S(H)_{:,t,:}|_2^2 $
+   encourages realistic one step dynamics. During generation, the same supervisor regularizes (E), so synthetic
+   trajectories inherit temporal structure observed in data.
+
+5. **Discriminator**
+   The discriminator receives a latent sequence and outputs per time step logits without a sigmoid:
+   $$
+   D(H) = \mathrm{GRU}*{\text{disc}}(H) W*{\text{disc}} + b_{\text{disc}} \in \mathbb{R}^{B\times T\times 1}.
+   $$
+
+The discriminator outputs per-timestep **logits** over latent sequences (D(\cdot)) with **no internal sigmoid**; it
+operates alongside Encoder, Recovery, Generator, and Supervisor that **all share the same block pattern**: stacked GRUs
+with hidden size `hidden_dim` and depth `num_layer`, followed by a **per-time-step linear head** to the target
+dimensionality (`d` for latent, `F` for features, `1` for logits).
+All tensors use the shape **[batch, seq_len, channels]**, and weights use **Xavier** initialization for input matrices
+and **orthogonal** initialization for recurrent matrices to maintain stable sequence modeling.
+
+### Data Flow
+
+- **Reconstruction path**: $X \xrightarrow{\text{Encoder}} H \xrightarrow{\text{Recovery}} \tilde{X}$
+- **Generation path**:
+  $Z \xrightarrow{\text{Generator}} \hat{E} \;\xrightarrow{\text{Supervisor}} \hat{H} \;\xrightarrow{\text{Recovery}} \hat{X}$
+
+Here $\tilde{X}$ reconstructs the input and $\hat{X}$ is the synthetic output in original feature scale after inverse
+min-max.
+
+### Training Phases
+
+1. **Encoder–Recovery pretrain**
+   Minimize reconstruction loss $\mathcal{L}_{\text{rec}} = \mathrm{MSE}(\tilde{X}, X)$ to align the
+   latent space with real LOB statistics and stabilize
+   later adversarial steps.
+
+2. **Supervisor pretrain**
+   Minimize next-step loss `L_sup = MSE(H[:,1:], S(H)[:,:-1])` to encode short-horizon temporal dynamics in latent
+   space.
+
+3. **Joint training**
+   Optimize Generator, Supervisor, and Discriminator together with a composite objective that includes:
+
+    - **Adversarial loss** on latent sequences for realism
+      $$
+      \mathcal{L}_{\text{adv}}^{G} = \mathrm{BCE}\!\big(D(\hat{H}), 1\big), \qquad
+      \mathcal{L}_{\text{adv}}^{D} = \mathrm{BCE}\!\big(D(H), 1\big) + \mathrm{BCE}\!\big(D(\hat{H}), 0\big) + \gamma\,\mathrm{BCE}\!\big(D(\hat{E}), 0\big).
+      $$
+
+    - **Reconstruction loss** to keep outputs faithful to LOB structure
+      $$
+      \mathcal{L}_{\text{rec}} = \mathrm{MSE}(\tilde{X}, X)
+      $$
+    - **Moment matching** on generated windows to align simple feature statistics
+      mean and standard deviation penalties over features, averaged across time
+    - **Supervision loss** retained as a consistency term in joint training
+
+Weights follow the implementation defaults: adversarial terms, supervision weight `w_gamma`, and generator moment weight
+`w_g`. Training uses Adam with learning rate `1e-4` and `β1 = 0.5`.
+
+### Loss Summary
+
+| Component         | Loss (formula)                                                                                                                   | Notes                                                                                            |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| **Discriminator** | $\mathcal{L}_{D} = \mathcal{L}_{\text{real}} + \mathcal{L}_{\text{fake}} + \gamma\,\mathcal{L}_{\text{fakeE}}$                   | Real vs. fake terms; extra penalty on encoder-driven fakes scaled by $\gamma$.                   |
+| **Generator**     | $\mathcal{L}*{G}=\mathcal{L}*{\text{adv}}^{G}+w_{g}!\cdot!(\text{moment penalties})+\sqrt{\mathcal{L}_{\text{sup}}+\varepsilon}$ | Adversarial + distribution-matching (moments) + supervised term (stabilized with $\varepsilon$). |
+| **Autoencoder**   | $\mathcal{L}_{\text{rec}}$                                                                                                       | Reconstruction on Encoder–Recovery during pretrain; applied lightly during joint training.       |
+
+### Shapes and Defaults
+
+| Setting                | Value / Shape |
+|------------------------|---------------|
+| `seq_len`, `z_dim`     | 128, 40       |
+| `hidden_dim`, `layers` | 64, 3         |
+| Windows                | ([N,128,40])  |
+| Latent                 | ([N,128,64])  |
+| Iters per phase        | 25,000        |
+
+This configuration learns both the distributional properties of spreads and midprice returns and the temporal structure
+of depth evolution, producing synthetic LOB sequences that are comparable to real data under the project’s KL and SSIM
+targets.
+
+## Training Processes
+
+## Results
+
+## Analysis of Performance Metrics
+
+## Style Space and Plot Discussion
+
 ## References
 
 ## Citation
