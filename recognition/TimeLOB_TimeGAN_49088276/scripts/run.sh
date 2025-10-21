@@ -59,7 +59,7 @@ python -m src.helpers.visualise  \
     --hidden-dim 64 \
     --num-layer 3 \
   --viz \
-    --samples 5 \
-    --out-dir ./outs/viz_run1 \
+    --samples 5 --out-dir ./outs/viz_run1 \
     --cmap magma --dpi 240 \
-    --bins 128 --levels 10
+    --bins 128 --levels 10 \
+    --walk --walk-steps 8 --walk-mode cross --walk-prefix latent_walk

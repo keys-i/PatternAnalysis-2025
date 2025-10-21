@@ -252,6 +252,31 @@ class VisualiseOptions:
             default=None,
             help="Optional path to save metrics CSV",
         )
+        parser.add_argument(
+            "--walk",
+            action="store_true",
+            help="Enable latent-space walks decoded via Encoder→Recovery",
+        )
+        parser.add_argument(
+            "--walk-steps",
+            type=int,
+            default=8,
+            help="Number of interpolation steps for latent walks (default: 8)",
+        )
+        parser.add_argument(
+            "--walk-mode",
+            type=str,
+            default="both",
+            choices=["within", "cross", "both"],
+            help="Which walk(s) to generate: within-regime, cross-regime, or both (default: both)",
+        )
+        parser.add_argument(
+            "--walk-prefix",
+            type=str,
+            default="latent_walk",
+            help="Filename prefix for latent-walk panels (default: latent_walk)",
+        )
+
         self._parser = parser
 
     def parse(self, argv: Optional[List[str]]) -> Namespace:
@@ -271,6 +296,10 @@ class VisualiseOptions:
             no_temp=bool(v.no_temp),
             no_lat=bool(v.no_lat),
             metrics_csv=(Path(v.metrics_csv) if v.metrics_csv is not None else None),
+            walk=bool(v.walk),
+            walk_steps=int(v.walk_steps),
+            walk_mode=str(v.walk_mode).lower(),
+            walk_prefix=str(v.walk_prefix),
         )
         return ns
 
