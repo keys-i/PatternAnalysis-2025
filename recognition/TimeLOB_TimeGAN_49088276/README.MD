@@ -379,10 +379,11 @@ Heatmaps and metrics are saved to `outs/` via the training hooks and `src/helper
 If you use this implementation in your research, please cite:
 
 ```bibtex
-@misc{stylegan2_adni_2025,
-  title={Conditional StyleGAN2 for ADNI (Alzheimer's Disease Neuroimaging Initiative)},
-  author={Tyreece Paul},
-  year={2025},
-  url={https://github.com/tyreecepaul/PatternAnalysis-2025}
+@misc{timegan_lobster_amzn_l10_2025,
+  title   = {TimeGAN for LOBSTER: Synthetic Limit Order Book Sequences (AMZN Level-10)},
+  author  = {Radhesh Goel},
+  year    = {2025},
+  url     = {https://github.com/keys-i/TimeLOB_TimeGAN_49088276},
+  note    = {Three-phase TimeGAN training with KL/SSIM evaluation on AMZN L10}
 }
 ```
