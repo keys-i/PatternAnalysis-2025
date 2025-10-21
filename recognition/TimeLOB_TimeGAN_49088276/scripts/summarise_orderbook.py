@@ -28,11 +28,12 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+
 
 # --------------------------- Config / Types ---------------------------- #
 @dataclass
@@ -70,7 +71,9 @@ def load_orderbook(csv_path: str, levels: int) -> pd.DataFrame:
 
 
 # ---------------------------- Computations ---------------------------- #
-def compute_top_of_book(ob: pd.DataFrame, tick_scale: float) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+def compute_top_of_book(
+    ob: pd.DataFrame, tick_scale: float
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
     ask1 = ob["ask_price_1"] / tick_scale
     bid1 = ob["bid_price_1"] / tick_scale
     spread = ask1 - bid1
@@ -161,7 +164,9 @@ def plot_midprice_series(outdir: str, mid_price: pd.Series, max_points: int = 40
 def plot_midlogret_hist(outdir: str, mid_logret: pd.Series) -> str:
     plt.figure(figsize=(7, 4))
     # clip heavy tails for nicer viz
-    vals = np.clip(mid_logret.values, np.percentile(mid_logret, 0.1), np.percentile(mid_logret, 99.9))
+    vals = np.clip(
+        mid_logret.values, np.percentile(mid_logret, 0.1), np.percentile(mid_logret, 99.9)
+    )
     plt.hist(vals, bins=100)
     plt.xlabel("log mid-price return")
     plt.ylabel("Count")
@@ -199,10 +204,14 @@ def write_markdown_summary(
     md.append(f"- **Zeros**: {zeros_total:,} cells  ({zeros_pct:.2f}%)")
     md.append("")
     md.append("## Top-of-book (level 1)\n")
-    md.append(f"- Spread (USD): mean={spread_stats['mean']:.6f}, std={spread_stats['std']:.6f}, "
-              f"min={spread_stats['min']:.6f}, max={spread_stats['max']:.6f}")
-    md.append(f"- |log mid-price return|: mean={mid_ret_stats['mean']:.6f}, std={mid_ret_stats['std']:.6f}, "
-              f"p99={mid_ret_stats['p99']:.6f}")
+    md.append(
+        f"- Spread (USD): mean={spread_stats['mean']:.6f}, std={spread_stats['std']:.6f}, "
+        f"min={spread_stats['min']:.6f}, max={spread_stats['max']:.6f}"
+    )
+    md.append(
+        f"- |log mid-price return|: mean={mid_ret_stats['mean']:.6f}, std={mid_ret_stats['std']:.6f}, "
+        f"p99={mid_ret_stats['p99']:.6f}"
+    )
     md.append("")
     md.append("## Artifacts\n")
     for name, path in artifacts.items():
@@ -218,8 +227,15 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--orderbook", required=True, help="Path to orderbook_10.csv")
     ap.add_argument("--outdir", required=True, help="Output directory for plots and tables")
     ap.add_argument("--levels", type=int, default=10, help="Number of book levels (default 10)")
-    ap.add_argument("--tick-scale", type=float, default=10_000.0, help="LOBSTER tick scale (price = ticks / scale)")
-    ap.add_argument("--seq-len", type=int, default=None, help="Optional: sequence length to estimate windows")
+    ap.add_argument(
+        "--tick-scale",
+        type=float,
+        default=10_000.0,
+        help="LOBSTER tick scale (price = ticks / scale)",
+    )
+    ap.add_argument(
+        "--seq-len", type=int, default=None, help="Optional: sequence length to estimate windows"
+    )
     return ap.parse_args()
 
 
@@ -249,17 +265,22 @@ def main() -> None:
 
     # Plots
     arts: dict[str, str] = {}
-    arts["depth_profile"]   = plot_depth_profile(args.outdir, bid_depth, ask_depth)
-    arts["spread_hist"]     = plot_spread_hist(args.outdir, spread)
+    arts["depth_profile"] = plot_depth_profile(args.outdir, bid_depth, ask_depth)
+    arts["spread_hist"] = plot_spread_hist(args.outdir, spread)
     arts["midprice_series"] = plot_midprice_series(args.outdir, mid_price)
-    arts["midlogret_hist"]  = plot_midlogret_hist(args.outdir, mid_logret)
+    arts["midlogret_hist"] = plot_midlogret_hist(args.outdir, mid_logret)
 
     # Small stats for summary
-    spread_stats = dict(mean=float(spread.mean()), std=float(spread.std()),
-                        min=float(spread.min()), max=float(spread.max()))
+    spread_stats = dict(
+        mean=float(spread.mean()),
+        std=float(spread.std()),
+        min=float(spread.min()),
+        max=float(spread.max()),
+    )
     abs_ret = mid_logret.abs()
-    mid_ret_stats = dict(mean=float(abs_ret.mean()), std=float(abs_ret.std()),
-                         p99=float(abs_ret.quantile(0.99)))
+    mid_ret_stats = dict(
+        mean=float(abs_ret.mean()), std=float(abs_ret.std()), p99=float(abs_ret.quantile(0.99))
+    )
 
     # Windows estimate
     wcount = windows_possible(len(ob), meta.seq_len)
@@ -279,6 +300,7 @@ def main() -> None:
     )
 
     print(f"[done] Summary written to: {args.outdir}")
+
 
 if __name__ == "__main__":
     main()
