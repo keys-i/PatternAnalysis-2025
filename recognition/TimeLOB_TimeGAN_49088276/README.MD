@@ -301,3 +301,88 @@ python npy_to_csv.py \
 - `outs/gen_data.npy` flat synthetic rows `[T, F]` in original feature scale
 - `outs/real.png`, `outs/synthetic_heatmap_{i}.png` depth heatmaps for SSIM
 - Optional plots: `outs/kl_spread_curve.png`, `outs/training_curves.png` if enabled in training/eval scripts
+
+## Dataset
+
+We use the **LOBSTER** limit order book for **AMZN** at **level 10** depth. The primary file is
+`AMZN_2012-06-21_34200000_57600000_orderbook_10.csv` containing 40 columns
+`[ask_price_1, ask_size_1, …, ask_price_10, ask_size_10, bid_price_1, bid_size_1, …, bid_price_10, bid_size_10]`.
+Place the file under `data/`. By default the code performs a **chronological** split into train, validation, and test to
+avoid leakage across time.
+
+Example depth visualizations are produced during evaluation as heatmaps in `outs/` for SSIM checks.
+
+*Files expected*
+
+* `data/AMZN_2012-06-21_34200000_57600000_orderbook_10.csv`
+* Optional: additional sessions can be summarized with `scripts/summarise_orderbook.py`
+
+---
+
+## Data Setup
+
+### Preprocessing for TimeGAN (see `src/dataset.py`)
+
+Pipeline steps applied to the order book snapshots:
+
+```text
+1) Load orderbook_10.csv  →  ndarray [T, 40]
+2) Optional filter: drop rows with any zero (configurable)
+3) Chronological split: train / val / test (default 0.7 / 0.15 / 0.15 or cumulative 0.7 / 0.85 / 1.0)
+4) Train-only MinMax scaling (fit on train, apply to val and test)
+5) Sliding windows: shape [N, seq_len, 40], with optional shuffle for training
+```
+
+#### Key flags (nested CLI):
+
+- **Dataset**: `--seq-len`, `--data-dir`, `--orderbook-filename`, `--splits`, `--keep-zero-rows`, `--no-shuffle`
+- **Modules**: `--batch-size`, `--z-dim` (use 40 for raw10), `--hidden-dim`, `--num-layer`, `--lr`, `--beta1`,
+  `--num-iters`
+
+#### Typical command:
+
+```bash
+python src/train.py \
+  --dataset \
+    --seq-len 128 \
+    --data-dir ./data \
+    --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
+    --splits 0.7 0.85 1.0 \
+  --modules \
+    --batch-size 128 \
+    --z-dim 40 \
+    --hidden-dim 64 \
+    --num-layer 3 \
+    --lr 1e-4 \
+    --beta1 0.5 \
+    --num-iters 25000
+```
+
+### Data Splits
+
+- **Training**: first segment of the day by time (no shuffling during split)
+- **Validation**: middle segment for periodic checks and model selection
+- **Test**: final segment held out for reporting metrics
+- **Method**: chronological index cutoffs, not random splitting
+
+#### Evaluation uses:
+
+- **Distribution similarity**: KL divergence for spread and midprice returns on the held out set
+- **Visual similarity**: SSIM between depth heatmaps of real and generated books
+
+Heatmaps and metrics are saved to `outs/` via the training hooks and `src/helpers/visualise`.
+
+## References
+
+## Citation
+
+If you use this implementation in your research, please cite:
+
+```bibtex
+@misc{stylegan2_adni_2025,
+  title={Conditional StyleGAN2 for ADNI (Alzheimer's Disease Neuroimaging Initiative)},
+  author={Tyreece Paul},
+  year={2025},
+  url={https://github.com/tyreecepaul/PatternAnalysis-2025}
+}
+```
