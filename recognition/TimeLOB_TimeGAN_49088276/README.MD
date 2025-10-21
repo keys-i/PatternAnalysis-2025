@@ -539,6 +539,56 @@ targets.
 
 ## Training Processes
 
+The model was trained to prioritize stability, efficiency, and temporal consistency while working within modest hardware
+limits. We ran experiments on macOS (BSD Unix) with an Apple M3 Pro GPU using MLS and Metal for acceleration. The code
+path was kept platform neutral so runs can be reproduced on Linux without changing training logic. Our goal was to bring
+the reconstruction loss and the adversarial loss to stable plateaus while keeping latent trajectories smooth across
+time, so the generator does not produce jittery or drifting sequences.
+
+Training followed the standard three phase TimeGAN schedule. First, we pretrained the encoder and recovery to minimize
+reconstruction error so the latent space reflects real limit order book statistics. Second, we pretrained the supervisor
+to predict the next latent step, which imposes a one step temporal constraint that regularizes later synthesis. Third,
+we switched to joint optimization of the generator, supervisor, and discriminator with a composite objective that mixes
+adversarial terms, the supervision loss, and simple moment matching on means and variances. Hyperparameters in each
+phase were tuned to preserve microstructure patterns such as spread, depth imbalance, and short horizon midprice
+movement, while avoiding common GAN failure modes like discriminator collapse or generator oscillation.
+
+---
+
+### Training Configuration
+
+| **Hyperparameter**              | **Value** | **Justification**                                                                 |
+|---------------------------------|----------:|-----------------------------------------------------------------------------------|
+| Batch Size                      |       128 | Balances convergence speed with M3 Pro unified memory constraints                 |
+| Sequence Length (`seq_len`)     |       128 | Captures short-term LOB dynamics within stable recurrent horizon                  |
+| Latent Dimension (`z_dim`)      |        40 | Matches feature count for AMZN Level-10 dataset                                   |
+| Hidden Dimension (`hidden_dim`) |        64 | Provides sufficient capacity for temporal modeling without overfitting            |
+| GRU Layers (`num_layer`)        |         3 | Captures multi-scale dependencies in sequential structure                         |
+| Learning Rate (`lr`)            |      1e-4 | Ensures stable joint optimization across all modules                              |
+| β₁ (Adam)                       |       0.5 | Standard for GAN training; stabilizes momentum updates                            |
+| Iterations per Phase            |     25000 | Aligns with default TimeGAN schedule for convergence                              |
+| Optimizer                       |      Adam | Used for all components (Encoder, Recovery, Generator, Supervisor, Discriminator) |
+
+---
+
+We optimize three complementary objectives so the model learns both what each window looks like and how it evolves over
+time. First, we use **MSE** as a reconstruction loss $ \mathrm{MSE}(\tilde X, X) $ to make the Encoder–Recovery path
+faithfully decode real windows, and as a supervision loss $ \mathrm{MSE}(H_{t+1}, S(H)_t) $ to teach the Supervisor one
+step latent dynamics. Second, we use **BCE with logits** for the adversarial game in latent space: the Discriminator
+learns to assign high logits to real latent paths and low logits to synthetic ones, while the Generator learns to
+produce latent paths that the Discriminator classifies as real. Third, we add **moment matching** penalties that align
+the first and second moments of generated windows with real windows, penalizing differences in feature means and
+standard deviations averaged over time. This simple statistic alignment reduces distributional drift without
+over–constraining higher order structure.
+
+For monitoring, we track **KL divergence** between real and synthetic distributions of **spread** and
+**midprice returns**, which probes whether basic market microstructure statistics are preserved. We also render depth *
+*heatmaps** from
+real and synthetic sequences and compute **SSIM**, which captures spatial coherency of price–level depth patterns.
+Across phases we save checkpoints of model weights, optimizer states, and loss curves to enable exact reproducibility
+and ablation. With this setup the synthetic sequences match the **distributional behavior** and **temporal dynamics** of
+the held–out data, meeting the targets **KL ≤ 0.1** and **SSIM > 0.6** on the test split.
+
 ## Results
 
 ## Analysis of Performance Metrics
