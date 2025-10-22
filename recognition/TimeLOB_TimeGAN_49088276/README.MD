@@ -265,12 +265,13 @@ python npy_to_csv.py \
 
 #### Top-level (parsed by `Options`)
 
-| Flag          | Type      | Default  | Description                                 | Example                        |
-|---------------|-----------|----------|---------------------------------------------|--------------------------------|
-| `--seed`      | int       | `42`     | Global random seed.                         | `--seed 1337`                  |
-| `--run-name`  | str       | `"exp1"` | Label for the run; used in logs/artefacts.  | `--run-name lob_amzn_l10`      |
-| `--dataset …` | namespace | —        | Tokens after this go to **DataOptions**.    | `--dataset --seq-len 128 …`    |
-| `--modules …` | namespace | —        | Tokens after this go to **ModulesOptions**. | `--modules --batch-size 128 …` |
+| Flag          | Type      | Default  | Description                                   | Example                        |
+|---------------|-----------|----------|-----------------------------------------------|--------------------------------|
+| `--seed`      | int       | `42`     | Global random seed.                           | `--seed 1337`                  |
+| `--run-name`  | str       | `"exp1"` | Label for the run; used in logs/artifacts.    | `--run-name lob_amzn_l10`      |
+| `--dataset …` | namespace | —        | Tokens after this go to **DataOptions**.      | `--dataset --seq-len 128 …`    |
+| `--modules …` | namespace | —        | Tokens after this go to **ModulesOptions**.   | `--modules --batch-size 128 …` |
+| `--viz …`     | namespace | —        | Tokens after this go to **VisualiseOptions**. | `--viz --samples 5 …`          |
 
 #### Data options (parsed by `DataOptions`)
 
@@ -293,10 +294,31 @@ python npy_to_csv.py \
 | `--hidden-dim` | int   | `64`                      | GRU hidden size across components.             | `--hidden-dim 64`   |
 | `--num-layer`  | int   | `3`                       | Stacked GRU layers per block.                  | `--num-layer 3`     |
 | `--lr`         | float | `1e-4`                    | Adam learning rate.                            | `--lr 1e-4`         |
-| `--beta1`      | float | `0.5`                     | Adam $\beta 1$ for GAN stability.              | `--beta1 0.5`       |
+| `--beta1`      | float | `0.5`                     | Adam beta1 for GAN stability.                  | `--beta1 0.5`       |
 | `--w-gamma`    | float | `1.0`                     | Weight on supervisor-related adversarial term. | `--w-gamma 1.0`     |
 | `--w-g`        | float | `1.0`                     | Weight on generator losses and moments.        | `--w-g 1.0`         |
 | `--num-iters`  | int   | `NUM_TRAINING_ITERATIONS` | Iterations per phase (ER, Supervisor, Joint).  | `--num-iters 25000` |
+
+#### Visualization options (parsed by `VisualiseOptions`)
+
+| Flag            | Type | Default          | Description                                               | Example                                |
+|-----------------|------|------------------|-----------------------------------------------------------|----------------------------------------|
+| `--samples`     | int  | `3`              | Number of synthetic samples to generate and evaluate.     | `--samples 5`                          |
+| `--out-dir`     | path | `OUTPUT_DIR/viz` | Output directory for heatmaps and metrics.                | `--out-dir ./outs/viz_run1`            |
+| `--bins`        | int  | `100`            | Histogram bins for KL computation.                        | `--bins 128`                           |
+| `--cmap`        | str  | `"coolwarm"`     | Colormap for heatmaps.                                    | `--cmap magma`                         |
+| `--no-log1p`    | flag | off              | Disable log1p transform in heatmaps.                      | `--no-log1p`                           |
+| `--dpi`         | int  | `220`            | DPI for saved figures.                                    | `--dpi 240`                            |
+| `--levels`      | int  | dataset default  | Override LOB levels if different from dataset.            | `--levels 10`                          |
+| `--no-ssim`     | flag | off              | Skip SSIM computation.                                    | `--no-ssim`                            |
+| `--no-kl`       | flag | off              | Skip KL(spread) and KL(mpr) computation.                  | `--no-kl`                              |
+| `--no-temp`     | flag | off              | Skip temporal correlation computation.                    | `--no-temp`                            |
+| `--no-lat`      | flag | off              | Skip latent distance computation.                         | `--no-lat`                             |
+| `--metrics-csv` | path | none             | Optional path to save metrics CSV.                        | `--metrics-csv ./outs/viz/metrics.csv` |
+| `--walk`        | flag | off              | Enable latent-space walks decoded via Encoder → Recovery. | `--walk`                               |
+| `--walk-steps`  | int  | `8`              | Number of interpolation steps for a latent walk.          | `--walk-steps 12`                      |
+| `--walk-mode`   | str  | `"both"`         | Which walk(s) to generate: `within`, `cross`, or `both`.  | `--walk-mode cross`                    |
+| `--walk-prefix` | str  | `"latent_walk"`  | Filename prefix for saved latent-walk panels.             | `--walk-prefix lw_run1`                |
 
 **Outputs:**
 
@@ -627,7 +649,7 @@ before the GRU stack to capture brief bursts that widen the spread.
 
 #### Within-Regime Interpolation
 
-**Note:** These visualisations were produced with the visualisation module after enabling the walk flags:
+**Note:** These visualizations were produced with the visualization module after enabling the walk flags:
 
 ```bash
 python -m src.viz.visualise \
@@ -638,7 +660,7 @@ python -m src.viz.visualise \
 ```
 
 <figure>
-  <img src="assets/latent_walk_tight_only.png" alt="Latent walk within a tight-spread regime: intermediate windows decoded to LOB depth heatmaps" width="800">
+  <img src="assets/latent_walk_tight_only.png" alt="Latent walk within a tight-spread regime: intermediate windows decoded to LOB depth heatmaps" width="5721">
   <figcaption>
     Latent walk within a tight-spread regime: intermediate windows decoded to LOB depth heatmaps.
   </figcaption>
@@ -664,7 +686,7 @@ python -m src.viz.visualise \
 ```
 
 <figure>
-  <img src="assets/latent_walk_tight_to_wide.png" alt="Latent walk from tight-spread to wide-spread regime: gradual widening of best-level separation and re-shaping of depth" width="800">
+  <img src="assets/latent_walk_tight_to_wide.png" alt="Latent walk from tight-spread to wide-spread regime: gradual widening of best-level separation and re-shaping of depth" width="5721">
   <figcaption>
     Latent walk from tight-spread to wide-spread regime: gradual widening of best-level separation and re-shaping of depth.
   </figcaption>
@@ -674,7 +696,7 @@ As the walk moves from a tight-spread endpoint toward a wide-spread endpoint, we
 ask and best bid, redistribution of volume from top levels toward deeper levels, and higher variability in short-horizon
 price deltas. These patterns indicate that the latent space encodes interpretable microstructure factors such as *
 *spread state**, **depth imbalance**, and **volatility**. The walks help verify that the generator represents a *
-*continuous spectrum** of LOB states rather than memorising snapshots, and that regime transitions yield plausible
+*continuous spectrum** of LOB states rather than memorizing snapshots, and that regime transitions yield plausible
 microstructure changes rather than artefacts or abrupt “jumps.”
 
 *All panels and intermediate sequences are saved under `outs/viz/` with filenames prefixed by the value passed
