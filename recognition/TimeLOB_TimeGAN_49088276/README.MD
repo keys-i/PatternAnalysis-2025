@@ -481,7 +481,7 @@ align generated data with true market statistics.
 5. **Discriminator**
    The discriminator receives a latent sequence and outputs per time step logits without a sigmoid:
    <div>
-   D(H)=\mathrm{GRU}_{\mathrm{disc}}(H)\,W_{\mathrm{disc}}+b_{\mathrm{disc}}\in\mathbb{R}^{B\times T\times 1}.$$
+   $$D(H)=\mathrm{GRU}_{\mathrm{disc}}(H)\,W_{\mathrm{disc}}+b_{\mathrm{disc}}\in\mathbb{R}^{B\times T\times 1}.$$
    </div>
 
 The discriminator outputs per-timestep **logits** over latent sequences (D(\cdot)) with **no internal sigmoid**; it
