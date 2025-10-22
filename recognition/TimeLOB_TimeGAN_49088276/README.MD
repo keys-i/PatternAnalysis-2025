@@ -435,11 +435,10 @@ align generated data with true market statistics.
    The encoder maps a scaled LOB window $X \in \mathbb{R}^{B\times T\times F}$ to a latent sequence $H \in
    \mathbb{R}^{B\times T\times d}$. We use stacked GRUs to capture short and medium horizon dynamics, followed by a
    linear projection and a pointwise sigmoid to keep activations bounded:
-
-   $$
+   ```math
    \big(H^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{enc}}(X),\qquad
    H=\sigma\!\big(H^{\mathrm{gru}}\,W_{\mathrm{enc}}+b_{\mathrm{enc}}\big).
-   $$
+   ```
 
    This path anchors the latent space to real microstructure so that latent transitions remain meaningful when we switch
    to generation.
@@ -447,11 +446,10 @@ align generated data with true market statistics.
 2. **Recovery**
    The recovery network decodes a latent sequence back to the original feature space. Given (H), it produces $\tilde X
    \in \mathbb{R}^{B\times T\times F}$ through a GRU and a linear head with optional sigmoid:
-
-   $$
+   ```math
    \big(\tilde{X}^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{rec}}(H),\qquad
    \tilde{X}=\sigma\!\big(\tilde{X}^{\mathrm{gru}}\,W_{\mathrm{rec}}+b_{\mathrm{rec}}\big).
-   $$
+   ```
 
    Together, encoder and recovery minimize a reconstruction loss $ \mathcal{L}_{\text{rec}} = | \tilde X - X |_2^2 $,
    which preserves price and depth structure and stabilizes later adversarial training.
@@ -459,11 +457,10 @@ align generated data with true market statistics.
 3. **Generator**
    The generator produces a latent trajectory from noise $Z \in \mathbb{R}^{B\times T\times z}$. A GRU stack followed by
    a projection yields $E \in \mathbb{R}^{B\times T\times d}$:
-
-   $$
+   ```math
    \big(E^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{gen}}(Z),\qquad
    E=\sigma\!\big(E^{\mathrm{gru}}\,W_{\mathrm{gen}}+b_{\mathrm{gen}}\big).
-   $$
+   ```
 
    We then pass (E) through the supervisor to enforce one step temporal consistency before decoding to synthetic
    windows $\hat X$ via the recovery. Generating in latent space makes the adversarial game better conditioned than
@@ -472,11 +469,10 @@ align generated data with true market statistics.
 4. **Supervisor**
    The supervisor learns the latent transition model. Given a real latent sequence (H), it predicts the next step (S(H))
    using a GRU plus a projection:
-
-   $$
+   ```math
    \big(S^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{sup}}(H),\qquad
    S(H)=\sigma\!\big(S^{\mathrm{gru}}\,W_{\mathrm{sup}}+b_{\mathrm{sup}}\big).
-   $$
+   ```
 
    The objective $ \mathcal{L}*{\text{sup}} = \tfrac{1}{B(T-1)d}\sum*{t=1}^{T-1}|H_{:,t+1,:} - S(H)_{:,t,:}|_2^2 $
    encourages realistic one-step dynamics. During generation, the same supervisor regularizes (E), so synthetic
@@ -484,10 +480,9 @@ align generated data with true market statistics.
 
 5. **Discriminator**
    The discriminator receives a latent sequence and outputs per time step logits without a sigmoid:
-
-   $$
+   ```math
    D(H)=\mathrm{GRU}_{\mathrm{disc}}(H)\,W_{\mathrm{disc}}+b_{\mathrm{disc}}\in\mathbb{R}^{B\times T\times 1}.
-   $$
+   ```
 
 The discriminator outputs per-timestep **logits** over latent sequences (D(\cdot)) with **no internal sigmoid**; it
 operates alongside Encoder, Recovery, Generator, and Supervisor that **all share the same block pattern**: stacked GRUs
@@ -520,17 +515,15 @@ min-max.
    Optimize Generator, Supervisor, and Discriminator together with a composite objective that includes:
 
     - **Adversarial loss** on latent sequences for realism
-
-      $$
+      ```math
       \mathcal{L}_{\mathrm{adv}}^{G}=\operatorname{BCE}\!\big(D(\hat{H}),1\big),\qquad
       \mathcal{L}_{\mathrm{adv}}^{D}=\operatorname{BCE}\!\big(D(H),1\big)+\operatorname{BCE}\!\big(D(\hat{H}),0\big)+\gamma\,\operatorname{BCE}\!\big(D(\hat{E}),0\big).
-      $$
+      ```
 
     - **Reconstruction loss** to keep outputs faithful to LOB structure
-
-      $$
+      ```math
       \mathcal{L}_{\mathrm{rec}}=\operatorname{MSE}(\tilde{X}, X)
-      $$
+      ```
 
     - **Moment matching** on generated windows to align simple feature statistics
       mean and standard deviation penalties over features, averaged across time
@@ -541,11 +534,32 @@ Weights follow the implementation defaults: adversarial terms, supervision weigh
 
 ### Loss Summary
 
-| Component         | Loss (formula)                                                                                                                  | Notes                                                                                            |
-|-------------------|---------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
-| **Discriminator** | $\mathcal{L}_{D}=\mathcal{L}_{\mathrm{real}}+\mathcal{L}_{\mathrm{fake}}+\gamma\,\mathcal{L}_{\mathrm{fakeE}}$                  | Real vs. fake terms; extra penalty on encoder-driven fakes scaled by $\gamma$.                   |
-| **Generator**     | $\mathcal{L}_{G}=\mathcal{L}_{\mathrm{adv}}^{G}+w_{g}\,(\text{moment penalties})+\sqrt{\mathcal{L}_{\mathrm{sup}}+\varepsilon}$ | Adversarial + distribution-matching (moments) + supervised term (stabilized with $\varepsilon$). |
-| **Autoencoder**   | $\mathcal{L}_{\mathrm{rec}}$                                                                                                    | Reconstruction on Encoder–Recovery during pretrain; applied lightly during joint training.       |
+<table>
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>Loss (formula)</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Discriminator</strong></td>
+      <td>$\mathcal{L}_{D}=\mathcal{L}_{\mathrm{real}}+\mathcal{L}_{\mathrm{fake}}+\gamma\,\mathcal{L}_{\mathrm{fakeE}}$</td>
+      <td>Real vs. fake terms; extra penalty on encoder-driven fakes scaled by $\gamma$.</td>
+    </tr>
+    <tr>
+      <td><strong>Generator</strong></td>
+      <td>$\mathcal{L}_{G}=\mathcal{L}_{\mathrm{adv}}^{G}+w_{g}\,(\mathrm{moment\ penalties})+\sqrt{\mathcal{L}_{\mathrm{sup}}+\varepsilon}$</td>
+      <td>Adversarial + distribution-matching (moments) + supervised term (stabilized with $\varepsilon$).</td>
+    </tr>
+    <tr>
+      <td><strong>Autoencoder</strong></td>
+      <td>$\mathcal{L}_{\mathrm{rec}}$</td>
+      <td>Reconstruction on Encoder–Recovery during pretrain; applied lightly during joint training.</td>
+    </tr>
+  </tbody>
+</table>
 
 ### Shapes and Defaults
 
