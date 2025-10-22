@@ -515,15 +515,15 @@ min-max.
    Optimize Generator, Supervisor, and Discriminator together with a composite objective that includes:
 
     - **Adversarial loss** on latent sequences for realism
-      ```math
-      \mathcal{L}_{\mathrm{adv}}^{G}=\operatorname{BCE}\!\big(D(\hat{H}),1\big),\qquad
-      \mathcal{L}_{\mathrm{adv}}^{D}=\operatorname{BCE}\!\big(D(H),1\big)+\operatorname{BCE}\!\big(D(\hat{H}),0\big)+\gamma\,\operatorname{BCE}\!\big(D(\hat{E}),0\big).
-      ```
+    <div>
+      $$\mathcal{L}_{\mathrm{adv}}^{G}=\mathrm{BCE}\!\big(D(\hat{H}),1\big),\qquad
+      \mathcal{L}_{\mathrm{adv}}^{D}=\mathrm{BCE}\!\big(D(H),1\big)+\mathrm{BCE}\!\big(D(\hat{H}),0\big)+\gamma\,\mathrm{BCE}\!\big(D(\hat{E}),0\big).$$
+    </div>
 
     - **Reconstruction loss** to keep outputs faithful to LOB structure
-      ```math
-      \mathcal{L}_{\mathrm{rec}}=\operatorname{MSE}(\tilde{X}, X)
-      ```
+    <div>
+      $$\mathcal{L}_{\mathrm{rec}}=\mathrm{MSE}(\tilde{X},X)$$
+    </div>
 
     - **Moment matching** on generated windows to align simple feature statistics
       mean and standard deviation penalties over features, averaged across time
