@@ -1,16 +1,14 @@
+#!/usr/bin/env python3
 """
-TimeGAN components with LOB-aware enhancements.
+TimeGAN with LOB-aware enhancements.
 
-Besides the canonical Embedder/Recovery/Generator/Supervisor/Discriminator, this
-module exposes an optional hybrid temporal backbone (TemporalBackbone) that can
-be injected into any component via ``TemporalBackboneConfig``. The backbone
-mixes positional encodings, dilated temporal convolutions (microstructure
-patterns), recurrent layers, and post-hoc self-attention blocks (global context),
-making the model more expressive than a basic TimeGAN.
+This module defines the five canonical components (Encoder, Recovery, Generator,
+Supervisor, Discriminator) and a thin training wrapper for AMZN LOBSTER L10.
+It supports three-phase training, periodic validation (KL on spread), history
+plotting, checkpointing, and simple generation utilities.
 
-Inputs are sequences shaped ``(batch_size, seq_len, feature_dim)`` and outputs
-mirror that shape. Advanced regularization utilities and training helpers are
-included near the bottom of the file.
+Inputs are sequences of shape ``[batch, seq_len, feature_dim]`` and all
+component outputs mirror that shape where appropriate.
 
 Exports:
     - Encoder
@@ -62,6 +60,7 @@ from src.helpers.utils import (
 
 
 def get_device() -> torch.device:
+    """Return CUDA, MPS, or CPU device in that order of preference."""
     if torch.cuda.is_available():
         return torch.device("cuda")
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
@@ -69,19 +68,20 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def set_seed(seed: Optional[int]):
+def set_seed(seed: Optional[int]) -> None:
+    """Set Python-side RNG seeds (NumPy, Torch, CUDA) if seed is non-negative."""
     if seed is None or seed < 0:
         return
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    # Leave non-deterministic algos for perf by default; toggle if needed.
     torch.use_deterministic_algorithms(False)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
 def xavier_gru_init(m: nn.Module) -> None:
+    """Initialize GRU and Linear layers with Xavier/orthogonal schemes."""
     if isinstance(m, nn.GRU):
         for name, p in m.named_parameters():
             t = cast(Tensor, p)
@@ -98,9 +98,7 @@ def xavier_gru_init(m: nn.Module) -> None:
 
 
 class Encoder(nn.Module):
-    """
-    Embedding network: original feature space → latent space.
-    """
+    """Embedding network: original feature space → latent space."""
 
     def __init__(self, input_dim: int, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
@@ -115,15 +113,14 @@ class Encoder(nn.Module):
         self.apply(xavier_gru_init)
 
     def forward(self, x: torch.Tensor, apply_sigmoid: bool = True) -> torch.Tensor:
+        """Return latent sequence H given X."""
         h, _ = self.rnn(x)
         h = self.proj(h)
         return self.act(h) if apply_sigmoid else h
 
 
 class Recovery(nn.Module):
-    """
-    Recovery network: latent space → original space.
-    """
+    """Recovery network: latent space → original space."""
 
     def __init__(self, hidden_dim: int, output_dim: int, num_layers: int) -> None:
         super().__init__()
@@ -138,15 +135,14 @@ class Recovery(nn.Module):
         self.apply(xavier_gru_init)
 
     def forward(self, h: torch.Tensor, apply_sigmoid: bool = True) -> torch.Tensor:
+        """Return reconstructed X̃ given H."""
         x_tilde, _ = self.rnn(h)
         x_tilde = self.proj(x_tilde)
         return self.act(x_tilde) if apply_sigmoid else x_tilde
 
 
 class Generator(nn.Module):
-    """
-    Generator: random noise Z → latent sequence E.
-    """
+    """Generator: random noise Z → latent sequence E."""
 
     def __init__(self, z_dim: int, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
@@ -161,15 +157,14 @@ class Generator(nn.Module):
         self.apply(xavier_gru_init)
 
     def forward(self, z: torch.Tensor, apply_sigmoid: bool = True) -> torch.Tensor:
+        """Return latent path E given Z."""
         g, _ = self.rnn(z)
         g = self.proj(g)
         return self.act(g) if apply_sigmoid else g
 
 
 class Supervisor(nn.Module):
-    """
-    Supervisor: next-step latent supervision H_t → H_{t+1}.
-    """
+    """Supervisor: next-step latent supervision H_t → H_{t+1}."""
 
     def __init__(self, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
@@ -184,13 +179,14 @@ class Supervisor(nn.Module):
         self.apply(xavier_gru_init)
 
     def forward(self, h: torch.Tensor, apply_sigmoid: bool = True) -> torch.Tensor:
+        """Return supervised latent S(H)."""
         s, _ = self.rnn(h)
         s = self.proj(s)
         return self.act(s) if apply_sigmoid else s
 
 
 class Discriminator(nn.Module):
-    """Discriminator: classify latent sequences (real vs synthetic)."""
+    """Discriminator over latent sequences; outputs per-timestep logits."""
 
     def __init__(self, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
@@ -200,18 +196,19 @@ class Discriminator(nn.Module):
             num_layers=num_layers,
             batch_first=True,
         )
-        # Note: No sigmoid here; BCEWithLogitsLoss expects raw logits
         self.proj = nn.Linear(hidden_dim, 1)
         self.apply(xavier_gru_init)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
+        """Return logits for each time step."""
         d, _ = self.rnn(h)
-        # produce a logit per timestep
         return self.proj(d)
 
 
 @dataclass
 class TrainingHistory:
+    """Buffer for tracking losses and validation metrics over iterations."""
+
     er_iters: List[int] = field(default_factory=list)
     er_vals: List[float] = field(default_factory=list)
 
@@ -303,6 +300,8 @@ class TrainingHistory:
 
 @dataclass
 class TimeGANHandles:
+    """Container for the five component modules (for external wiring if needed)."""
+
     encoder: Encoder
     recovery: Recovery
     generator: Generator
@@ -312,6 +311,8 @@ class TimeGANHandles:
 
 @runtime_checkable
 class OptLike(Protocol):
+    """Structural type for options needed by TimeGAN."""
+
     batch_size: int
     seq_len: int
     z_dim: int
