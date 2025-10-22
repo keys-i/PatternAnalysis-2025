@@ -435,10 +435,10 @@ align generated data with true market statistics.
    The encoder maps a scaled LOB window $X \in \mathbb{R}^{B\times T\times F}$ to a latent sequence $H \in
    \mathbb{R}^{B\times T\times d}$. We use stacked GRUs to capture short and medium horizon dynamics, followed by a
    linear projection and a pointwise sigmoid to keep activations bounded:
-   ```math
-   \big(H^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{enc}}(X),\qquad
-   H=\sigma\!\big(H^{\mathrm{gru}}\,W_{\mathrm{enc}}+b_{\mathrm{enc}}\big).
-   ```
+   <div>
+   $$\big(H^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{enc}}(X),\qquad
+   H=\sigma\!\big(H^{\mathrm{gru}}\,W_{\mathrm{enc}}+b_{\mathrm{enc}}\big).$$
+   </div>
 
    This path anchors the latent space to real microstructure so that latent transitions remain meaningful when we switch
    to generation.
@@ -446,10 +446,10 @@ align generated data with true market statistics.
 2. **Recovery**
    The recovery network decodes a latent sequence back to the original feature space. Given (H), it produces $\tilde X
    \in \mathbb{R}^{B\times T\times F}$ through a GRU and a linear head with optional sigmoid:
-   ```math
-   \big(\tilde{X}^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{rec}}(H),\qquad
-   \tilde{X}=\sigma\!\big(\tilde{X}^{\mathrm{gru}}\,W_{\mathrm{rec}}+b_{\mathrm{rec}}\big).
-   ```
+   <div>
+   $$\big(\tilde{X}^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{rec}}(H),\qquad
+   \tilde{X}=\sigma\!\big(\tilde{X}^{\mathrm{gru}}\,W_{\mathrm{rec}}+b_{\mathrm{rec}}\big).$$
+   </div>
 
    Together, encoder and recovery minimize a reconstruction loss $ \mathcal{L}_{\text{rec}} = | \tilde X - X |_2^2 $,
    which preserves price and depth structure and stabilizes later adversarial training.
@@ -457,10 +457,10 @@ align generated data with true market statistics.
 3. **Generator**
    The generator produces a latent trajectory from noise $Z \in \mathbb{R}^{B\times T\times z}$. A GRU stack followed by
    a projection yields $E \in \mathbb{R}^{B\times T\times d}$:
-   ```math
-   \big(E^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{gen}}(Z),\qquad
-   E=\sigma\!\big(E^{\mathrm{gru}}\,W_{\mathrm{gen}}+b_{\mathrm{gen}}\big).
-   ```
+   <div>
+   $$\big(E^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{gen}}(Z),\qquad
+   E=\sigma\!\big(E^{\mathrm{gru}}\,W_{\mathrm{gen}}+b_{\mathrm{gen}}\big).$$
+   </div>
 
    We then pass (E) through the supervisor to enforce one step temporal consistency before decoding to synthetic
    windows $\hat X$ via the recovery. Generating in latent space makes the adversarial game better conditioned than
@@ -469,10 +469,10 @@ align generated data with true market statistics.
 4. **Supervisor**
    The supervisor learns the latent transition model. Given a real latent sequence (H), it predicts the next step (S(H))
    using a GRU plus a projection:
-   ```math
-   \big(S^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{sup}}(H),\qquad
-   S(H)=\sigma\!\big(S^{\mathrm{gru}}\,W_{\mathrm{sup}}+b_{\mathrm{sup}}\big).
-   ```
+   <div>
+   $$\big(S^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{sup}}(H),\qquad
+   S(H)=\sigma\!\big(S^{\mathrm{gru}}\,W_{\mathrm{sup}}+b_{\mathrm{sup}}\big).$$
+   </div>
 
    The objective $ \mathcal{L}*{\text{sup}} = \tfrac{1}{B(T-1)d}\sum*{t=1}^{T-1}|H_{:,t+1,:} - S(H)_{:,t,:}|_2^2 $
    encourages realistic one-step dynamics. During generation, the same supervisor regularizes (E), so synthetic
@@ -480,9 +480,9 @@ align generated data with true market statistics.
 
 5. **Discriminator**
    The discriminator receives a latent sequence and outputs per time step logits without a sigmoid:
-   ```math
-   D(H)=\mathrm{GRU}_{\mathrm{disc}}(H)\,W_{\mathrm{disc}}+b_{\mathrm{disc}}\in\mathbb{R}^{B\times T\times 1}.
-   ```
+   <div>
+   D(H)=\mathrm{GRU}_{\mathrm{disc}}(H)\,W_{\mathrm{disc}}+b_{\mathrm{disc}}\in\mathbb{R}^{B\times T\times 1}.$$
+   </div>
 
 The discriminator outputs per-timestep **logits** over latent sequences (D(\cdot)) with **no internal sigmoid**; it
 operates alongside Encoder, Recovery, Generator, and Supervisor that **all share the same block pattern**: stacked GRUs
