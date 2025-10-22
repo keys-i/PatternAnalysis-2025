@@ -103,7 +103,7 @@ Training was carried out on **macOS (BSD Unix)** using an Apple M3 Pro system; t
 Linux.
 Windows was not used for training.
 > **Note**
-> Hardware: Apple M3 Pro GPU with MLS/Metal support, o[environment.yml](environment.yml)r equivalent; at least 8 GB of
+> Hardware: Apple M3 Pro GPU with MLS/Metal support, or equivalent; at least 8 GB of
 > unified memory is advisable.
 
 | Dependency        | Suggested version | One-line use case                                                                         |
@@ -184,12 +184,12 @@ Produces exactly `len(test)` rows in original feature space and saves as NumPy.
 
 ```bash
 python -m src.predict \
-   --dataset \
+  --dataset \
     --seq-len 128 \
     --data-dir ./data \
     --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
     --splits 0.7 0.85 1.0 \
-   --modules \
+  --modules \
     --batch-size 128 \
     --z-dim 40 \
     --hidden-dim 64 \
@@ -201,7 +201,7 @@ python -m src.predict \
 Specify `--rows` to override the default.
 
 ```bash
-python src/predict.py \
+python -m src.predict \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \
@@ -210,45 +210,58 @@ python src/predict.py \
     --batch-size 128 \
     --z-dim 40 \
     --hidden-dim 64 \
-    --num-layer 3
+    --num-layer 3 \
+  --rows 50000
 ```
 
-#### 3. Render depth heatmaps (real vs synthetic)
+#### 3. Render depth heatmaps and compute metrics
 
-Creates side-by-side heatmaps for SSIM inspection.
+Creates single-panel heatmaps and reports **SSIM**, **KL(spread)**, **KL(mpr)**,
+**Temporal Consistency** and **Latent Distance**. Saves a metrics CSV.
 
 ```bash
-python -m src.viz.ssim_heatmap \
+python -m src.helpers.visualise \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \
     --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
   --modules \
     --batch-size 128 \
-     --z-dim 40 \
-     --hidden-dim 64 \
-     --num-layer 3
-# saves outs/real.png and outs/synthetic_heatmap_{i}.png
+    --z-dim 40 \
+    --hidden-dim 64 \
+    --num-layer 3 \
+  --viz \
+    --samples 5 \
+    --out-dir ./outs/viz_run1 \
+    --cmap magma \
+    --dpi 240 \
+    --bins 128 \
+    --levels 10 \
+    --metrics-csv ./outs/viz_run1/metrics.csv
+# saves ./outs/viz_run1/real_heatmap.png and ./outs/viz_run1/synthetic_*.png
+# logs and writes SSIM, KL(spread), KL(mpr), TempCorr, LatDist
 ```
 
-#### 4. Quick metrics (KL and SSIM)
+#### 4. Quick metrics only (no figures)
 
-During generation or via post-hoc scripts you can compute:
-
-* **KL(spread)** and **KL(midprice returns)** on a held-out slice
-* **SSIM** between real and synthetic heatmaps
+You can toggle metrics with flags if you want a lightweight run. The command below computes **KL(spread)**, **KL(mpr)**,
+**SSIM**, **Temporal Consistency**, and **Latent Distance** without generating extra samples (set `--samples 0`).
 
 ```bash
-python src/helpers/visualise.py \
+python -m src.helpers.visualise \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \
-    --orderbook-filename orderbook_10.csv \
+    --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
   --modules \
     --batch-size 128 \
     --z-dim 40 \
     --hidden-dim 64 \
-    --num-layer 3
+    --num-layer 3 \
+  --viz \
+    --samples 0 \
+    --out-dir ./outs/viz_quick \
+    --metrics-csv ./outs/viz_quick/metrics.csv
 ```
 
 #### 5. Export to CSV
@@ -422,30 +435,36 @@ align generated data with true market statistics.
    The encoder maps a scaled LOB window $X \in \mathbb{R}^{B\times T\times F}$ to a latent sequence $H \in
    \mathbb{R}^{B\times T\times d}$. We use stacked GRUs to capture short and medium horizon dynamics, followed by a
    linear projection and a pointwise sigmoid to keep activations bounded:
+
    $$
-   H^{\text{gru}},_ = \mathrm{GRU}*{\text{enc}}(X),\qquad
-   H = \sigma\big(H^{\text{gru}} W*{\text{enc}} + b_{\text{enc}}\big).
+   \big(H^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{enc}}(X),\qquad
+   H=\sigma\!\big(H^{\mathrm{gru}}\,W_{\mathrm{enc}}+b_{\mathrm{enc}}\big).
    $$
+
    This path anchors the latent space to real microstructure so that latent transitions remain meaningful when we switch
    to generation.
 
 2. **Recovery**
    The recovery network decodes a latent sequence back to the original feature space. Given (H), it produces $\tilde X
    \in \mathbb{R}^{B\times T\times F}$ through a GRU and a linear head with optional sigmoid:
+
    $$
-   X^{\sim\text{gru}},_ = \mathrm{GRU}*{\text{rec}}(H),\qquad
-   \tilde X = \sigma\big(X^{\sim\text{gru}} W*{\text{rec}} + b_{\text{rec}}\big).
+   \big(\tilde{X}^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{rec}}(H),\qquad
+   \tilde{X}=\sigma\!\big(\tilde{X}^{\mathrm{gru}}\,W_{\mathrm{rec}}+b_{\mathrm{rec}}\big).
    $$
+
    Together, encoder and recovery minimize a reconstruction loss $ \mathcal{L}_{\text{rec}} = | \tilde X - X |_2^2 $,
    which preserves price and depth structure and stabilizes later adversarial training.
 
 3. **Generator**
    The generator produces a latent trajectory from noise $Z \in \mathbb{R}^{B\times T\times z}$. A GRU stack followed by
    a projection yields $E \in \mathbb{R}^{B\times T\times d}$:
+
    $$
-   E^{\text{gru}},_ = \mathrm{GRU}*{\text{gen}}(Z),\qquad
-   E = \sigma\big(E^{\text{gru}} W*{\text{gen}} + b_{\text{gen}}\big).
+   \big(E^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{gen}}(Z),\qquad
+   E=\sigma\!\big(E^{\mathrm{gru}}\,W_{\mathrm{gen}}+b_{\mathrm{gen}}\big).
    $$
+
    We then pass (E) through the supervisor to enforce one step temporal consistency before decoding to synthetic
    windows $\hat X$ via the recovery. Generating in latent space makes the adversarial game better conditioned than
    operating directly on raw features.
@@ -453,18 +472,21 @@ align generated data with true market statistics.
 4. **Supervisor**
    The supervisor learns the latent transition model. Given a real latent sequence (H), it predicts the next step (S(H))
    using a GRU plus a projection:
+
    $$
-   S^{\text{gru}},_ = \mathrm{GRU}*{\text{sup}}(H),\qquad
-   S(H) = \sigma\big(S^{\text{gru}} W*{\text{sup}} + b_{\text{sup}}\big).
+   \big(S^{\mathrm{gru}},\_\big)=\mathrm{GRU}_{\mathrm{sup}}(H),\qquad
+   S(H)=\sigma\!\big(S^{\mathrm{gru}}\,W_{\mathrm{sup}}+b_{\mathrm{sup}}\big).
    $$
+
    The objective $ \mathcal{L}*{\text{sup}} = \tfrac{1}{B(T-1)d}\sum*{t=1}^{T-1}|H_{:,t+1,:} - S(H)_{:,t,:}|_2^2 $
    encourages realistic one-step dynamics. During generation, the same supervisor regularizes (E), so synthetic
    trajectories inherit temporal structure observed in data.
 
 5. **Discriminator**
    The discriminator receives a latent sequence and outputs per time step logits without a sigmoid:
+
    $$
-   D(H) = \mathrm{GRU}*{\text{disc}}(H) W*{\text{disc}} + b_{\text{disc}} \in \mathbb{R}^{B\times T\times 1}.
+   D(H)=\mathrm{GRU}_{\mathrm{disc}}(H)\,W_{\mathrm{disc}}+b_{\mathrm{disc}}\in\mathbb{R}^{B\times T\times 1}.
    $$
 
 The discriminator outputs per-timestep **logits** over latent sequences (D(\cdot)) with **no internal sigmoid**; it
@@ -498,15 +520,18 @@ min-max.
    Optimize Generator, Supervisor, and Discriminator together with a composite objective that includes:
 
     - **Adversarial loss** on latent sequences for realism
+
       $$
-      \mathcal{L}_{\text{adv}}^{G} = \mathrm{BCE}\!\big(D(\hat{H}), 1\big), \qquad
-      \mathcal{L}_{\text{adv}}^{D} = \mathrm{BCE}\!\big(D(H), 1\big) + \mathrm{BCE}\!\big(D(\hat{H}), 0\big) + \gamma\,\mathrm{BCE}\!\big(D(\hat{E}), 0\big).
+      \mathcal{L}_{\mathrm{adv}}^{G}=\operatorname{BCE}\!\big(D(\hat{H}),1\big),\qquad
+      \mathcal{L}_{\mathrm{adv}}^{D}=\operatorname{BCE}\!\big(D(H),1\big)+\operatorname{BCE}\!\big(D(\hat{H}),0\big)+\gamma\,\operatorname{BCE}\!\big(D(\hat{E}),0\big).
       $$
 
     - **Reconstruction loss** to keep outputs faithful to LOB structure
+
       $$
-      \mathcal{L}_{\text{rec}} = \mathrm{MSE}(\tilde{X}, X)
+      \mathcal{L}_{\mathrm{rec}}=\operatorname{MSE}(\tilde{X}, X)
       $$
+
     - **Moment matching** on generated windows to align simple feature statistics
       mean and standard deviation penalties over features, averaged across time
     - **Supervision loss** retained as a consistency term in joint training
@@ -516,11 +541,11 @@ Weights follow the implementation defaults: adversarial terms, supervision weigh
 
 ### Loss Summary
 
-| Component         | Loss (formula)                                                                                                                   | Notes                                                                                            |
-|-------------------|----------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
-| **Discriminator** | $\mathcal{L}_{D} = \mathcal{L}_{\text{real}} + \mathcal{L}_{\text{fake}} + \gamma\,\mathcal{L}_{\text{fakeE}}$                   | Real vs. fake terms; extra penalty on encoder-driven fakes scaled by $\gamma$.                   |
-| **Generator**     | $\mathcal{L}*{G}=\mathcal{L}*{\text{adv}}^{G}+w_{g}!\cdot!(\text{moment penalties})+\sqrt{\mathcal{L}_{\text{sup}}+\varepsilon}$ | Adversarial + distribution-matching (moments) + supervised term (stabilized with $\varepsilon$). |
-| **Autoencoder**   | $\mathcal{L}_{\text{rec}}$                                                                                                       | Reconstruction on Encoder–Recovery during pretrain; applied lightly during joint training.       |
+| Component         | Loss (formula)                                                                                                                  | Notes                                                                                            |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| **Discriminator** | $\mathcal{L}_{D}=\mathcal{L}_{\mathrm{real}}+\mathcal{L}_{\mathrm{fake}}+\gamma\,\mathcal{L}_{\mathrm{fakeE}}$                  | Real vs. fake terms; extra penalty on encoder-driven fakes scaled by $\gamma$.                   |
+| **Generator**     | $\mathcal{L}_{G}=\mathcal{L}_{\mathrm{adv}}^{G}+w_{g}\,(\text{moment penalties})+\sqrt{\mathcal{L}_{\mathrm{sup}}+\varepsilon}$ | Adversarial + distribution-matching (moments) + supervised term (stabilized with $\varepsilon$). |
+| **Autoencoder**   | $\mathcal{L}_{\mathrm{rec}}$                                                                                                    | Reconstruction on Encoder–Recovery during pretrain; applied lightly during joint training.       |
 
 ### Shapes and Defaults
 
@@ -581,8 +606,8 @@ standard deviations averaged over time. This simple statistic alignment reduces 
 over–constraining higher order structure.
 
 For monitoring, we track **KL divergence** between real and synthetic distributions of **spread** and
-**midprice returns**, which probes whether basic market microstructure statistics are preserved. We also render depth *
-*heatmaps** from
+**midprice returns**, which probes whether basic market microstructure statistics are preserved. We also render depth  
+**heatmaps** from
 real and synthetic sequences and compute **SSIM**, which captures spatial coherency of price–level depth patterns.
 Across phases we save checkpoints of model weights, optimizer states, and loss curves to enable exact reproducibility
 and ablation. With this setup the synthetic sequences match the **distributional behaviour** and **temporal dynamics**
@@ -694,9 +719,9 @@ python -m src.viz.visualise \
 
 As the walk moves from a tight-spread endpoint toward a wide-spread endpoint, we observe progressive separation of best
 ask and best bid, redistribution of volume from top levels toward deeper levels, and higher variability in short-horizon
-price deltas. These patterns indicate that the latent space encodes interpretable microstructure factors such as *
-*spread state**, **depth imbalance**, and **volatility**. The walks help verify that the generator represents a *
-*continuous spectrum** of LOB states rather than memorizing snapshots, and that regime transitions yield plausible
+price deltas. These patterns indicate that the latent space encodes interpretable microstructure factors such as
+**spread state**, **depth imbalance**, and **volatility**. The walks help verify that the generator represents a
+**continuous spectrum** of LOB states rather than memorizing snapshots, and that regime transitions yield plausible
 microstructure changes rather than artefacts or abrupt “jumps.”
 
 *All panels and intermediate sequences are saved under `outs/viz/` with filenames prefixed by the value passed

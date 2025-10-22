@@ -72,7 +72,7 @@ python -m src.predict \
     --num-layer 3
 
 # Visualisation + metrics + latent walks
-python -m src.viz.visualise \
+python -m src.helpers.visualise \
   --dataset \
     --seq-len 128 \
     --data-dir ./data \
