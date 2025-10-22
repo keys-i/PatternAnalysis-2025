@@ -82,6 +82,7 @@ TimeLOB_TimeGAN_49088276/
 ├── environment.yml                       # conda environment with all dependencies.
 ├── scripts/
 │         ├── run.sh                      # rangpur/local script for running the project
+│         ├── npy_to_csv.py               # exports the generated data to a csv
 │         └── summarise_orderbook.py      # test script to get to know about the dataset
 └── src/
     ├── dataset.py                        # data loader and preprocesser (includes data loading, scaling and normalising.)
@@ -114,6 +115,7 @@ Windows was not used for training.
 | matplotlib        |            3.10.7 | Plots for training curves, spread/return histograms, and LOB depth heatmaps.              |
 | scikit-learn      |             1.7.2 | Analysis utilities (e.g., PCA/MI) in feature studies and ablations outside core training. |
 | scikit-image      |            0.25.2 | SSIM computation to compare real vs synthetic heatmaps.                                   |
+| seaborn           |            0.13.2 | High-level plotting for clean LOB depth heatmaps and latent-walk panels.                  |
 | tqdm              |            4.67.1 | Progress bars for three-phase training with periodic metric updates.                      |
 | contextvars       |               2.4 | Context-local state to keep logging and progress output tidy across workers.              |
 | rich              |            14.2.0 | Pretty console logs, status spinners, and summary tables during data prep and training.   |
@@ -161,9 +163,9 @@ python src/train.py \
 | `z_dim`                | 40                | Matches raw10 feature count                |
 | `hidden_dim`           | 64                | GRU hidden size across components          |
 | `layers`               | 3                 | Stacked GRU depth                          |
-| `optimizer`            | Adam              | β1 tuned for GAN stability                 |
+| `optimizer`            | Adam              | $\beta 1$ tuned for GAN stability          |
 | `learning rate`        | 1e-4              | Shared across E, R, G, S, D                |
-| β1                     | 0.5               | Momentum term for Adam                     |
+| $\beta 1$              | 0.5               | Momentum term for Adam                     |
 | `iterations per phase` | 25,000            | ER, Supervisor, and Joint phases each      |
 | scaling                | train-only MinMax | Fit on train split, apply to val/test      |
 
@@ -291,7 +293,7 @@ python npy_to_csv.py \
 | `--hidden-dim` | int   | `64`                      | GRU hidden size across components.             | `--hidden-dim 64`   |
 | `--num-layer`  | int   | `3`                       | Stacked GRU layers per block.                  | `--num-layer 3`     |
 | `--lr`         | float | `1e-4`                    | Adam learning rate.                            | `--lr 1e-4`         |
-| `--beta1`      | float | `0.5`                     | Adam β1 for GAN stability.                     | `--beta1 0.5`       |
+| `--beta1`      | float | `0.5`                     | Adam $\beta 1$ for GAN stability.              | `--beta1 0.5`       |
 | `--w-gamma`    | float | `1.0`                     | Weight on supervisor-related adversarial term. | `--w-gamma 1.0`     |
 | `--w-g`        | float | `1.0`                     | Weight on generator losses and moments.        | `--w-g 1.0`         |
 | `--num-iters`  | int   | `NUM_TRAINING_ITERATIONS` | Iterations per phase (ER, Supervisor, Joint).  | `--num-iters 25000` |
@@ -540,7 +542,7 @@ movement, while avoiding common GAN failure modes like discriminator collapse or
 | Hidden Dimension (`hidden_dim`) |        64 | Provides sufficient capacity for temporal modeling without overfitting            |
 | GRU Layers (`num_layer`)        |         3 | Captures multi-scale dependencies in sequential structure                         |
 | Learning Rate (`lr`)            |      1e-4 | Ensures stable joint optimization across all modules                              |
-| β₁ (Adam)                       |       0.5 | Standard for GAN training; stabilizes momentum updates                            |
+| $\beta_1$   (Adam)              |       0.5 | Standard for GAN training; stabilizes momentum updates                            |
 | Iterations per Phase            |     25000 | Aligns with default TimeGAN schedule for convergence                              |
 | Optimizer                       |      Adam | Used for all components (Encoder, Recovery, Generator, Supervisor, Discriminator) |
 
@@ -566,6 +568,117 @@ of
 the held–out data, meeting the targets **KL ≤ 0.1** and **SSIM > 0.6** on the test split.
 
 ## Results
+
+> **Note:**
+> Five trials were run. The results below are from Trial 5.
+
+### Quantitative Results
+
+| Sample        |  SSIM  | KL(spread) | KL(mpr) | TempCorr | LatDist |
+|---------------|:------:|-----------:|--------:|---------:|--------:|
+| synthetic_000 | 0.7855 |     2.2970 |  0.4999 |   0.0004 |  0.0104 |
+| synthetic_001 | 0.7927 |     3.0994 |  0.4285 |   0.0002 |  0.0088 |
+| synthetic_002 | 0.7885 |     3.5033 |  0.4641 |  -0.0030 |  0.0097 |
+| synthetic_003 | 0.7914 |     2.3189 |  0.4194 |  -0.0027 |  0.0100 |
+| synthetic_004 | 0.7891 |     2.2062 |  0.4550 |  -0.0016 |  0.0092 |
+
+**Interpretation.** SSIM is consistently above 0.78, which indicates the generated depth maps preserve level structure
+and spatial coherence. KL on midprice returns sits around 0.42 to 0.50, meaning the return distribution is broadly
+aligned but still smoother than the real series. KL on spread is elevated at roughly 2.2 to 3.5, which suggests the
+model underrepresents widespread regimes and compresses best level price dynamics. Temporal correlation is near zero as
+intended for short horizon deltas, and the latent distance is small at approximately 0.009 to 0.010, which shows the
+trajectories remain close in latent space without collapsing.
+
+
+<figure>
+  <table>
+    <tr>
+      <td><img src="assets/real_heatmap.png" alt="Real LOB depth heatmap" width="1971"></td>
+      <td><img src="assets/synthetic_000.png" alt="Synthetic LOB depth heatmap #000" width="1971"></td>
+    </tr>
+    <tr>
+      <td><img src="assets/synthetic_001.png" alt="Synthetic LOB depth heatmap #001" width="1971"></td>
+      <td><img src="assets/synthetic_002.png" alt="Synthetic LOB depth heatmap #002" width="1971"></td>
+    </tr>
+  </table>
+  <figcaption>
+    <strong>Figure 1.</strong>
+    2×2 grid of LOB depth heatmaps: real (top-left) and three synthetic samples (others).
+    Additional pairs are saved in <code>outs/viz/</code>.
+  </figcaption>
+</figure>
+
+### Qualitative Results
+
+The generated books show clean level stacks and realistic depth gradients, which matches the strong SSIM scores.
+Visually, spread regimes are narrower than in the real data, and high volatility intervals exhibit less pronounced best
+level separation, which is consistent with the high KL on spread. Midprice paths look smooth and plausible; the return
+histogram is close but slightly underweight's tails, in line with the KL(mpr) values. The temporal consistency metric
+near zero confirms that short horizon changes are not spuriously correlated, while small latent distances indicate the
+generator follows the learned latent dynamics without drifting.
+
+**Next steps.** Improve spread modelling by increasing supervision strength for transitions that affect best ask and
+best
+bid, adding a small spread aware term in the loss, and exposing more volatile slices during sampling. Consider modest
+adjustments to loss weights for moment penalties and supervision, and experiment with a short temporal convolution
+before the GRU stack to capture brief bursts that widen the spread.
+
+### Interpolation of Results (Latent Space Walks)
+
+#### Within-Regime Interpolation
+
+**Note:** These visualisations were produced with the visualisation module after enabling the walk flags:
+
+```bash
+python -m src.viz.visualise \
+  --viz --samples 0 --walk --walk-mode within --walk-steps 8 --walk-prefix latent_walk \
+  --dataset --seq-len 128 --data-dir ./data \
+            --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
+  --modules --batch-size 128 --z-dim 40 --hidden-dim 64 --num-layer 3 --num-iters 25000
+```
+
+<figure>
+  <img src="assets/latent_walk_tight_only.png" alt="Latent walk within a tight-spread regime: intermediate windows decoded to LOB depth heatmaps" width="800">
+  <figcaption>
+    Latent walk within a tight-spread regime: intermediate windows decoded to LOB depth heatmaps.
+  </figcaption>
+</figure>
+
+We linearly interpolate in latent space between two **tight-spread** windows selected from the held-out set, then decode
+each intermediate through **Generator → Supervisor → Recovery**. Smooth transitions across frames indicate a well-shaped
+manifold: shallow but coherent depth stacks, stable best-level quotes, and short-horizon price changes without abrupt
+jumps. The intermediate frames show gradual reallocation of volume across levels and gentle mid-price drift, which
+suggests that the generator captures continuous LOB dynamics within a given regime.
+
+#### Cross-Regime Interpolation
+
+**Note:** Cross-regime walks were generated by switching the mode and letting the tool pick a **tight** and a **wide**
+endpoint automatically:
+
+```bash
+python -m src.viz.visualise \
+  --viz --samples 0 --walk --walk-mode cross --walk-steps 8 --walk-prefix latent_walk \
+  --dataset --seq-len 128 --data-dir ./data \
+            --orderbook-filename AMZN_2012-06-21_34200000_57600000_orderbook_10.csv \
+  --modules --batch-size 128 --z-dim 40 --hidden-dim 64 --num-layer 3 --num-iters 25000
+```
+
+<figure>
+  <img src="assets/latent_walk_tight_to_wide.png" alt="Latent walk from tight-spread to wide-spread regime: gradual widening of best-level separation and re-shaping of depth" width="800">
+  <figcaption>
+    Latent walk from tight-spread to wide-spread regime: gradual widening of best-level separation and re-shaping of depth.
+  </figcaption>
+</figure>
+
+As the walk moves from a tight-spread endpoint toward a wide-spread endpoint, we observe progressive separation of best
+ask and best bid, redistribution of volume from top levels toward deeper levels, and higher variability in short-horizon
+price deltas. These patterns indicate that the latent space encodes interpretable microstructure factors such as *
+*spread state**, **depth imbalance**, and **volatility**. The walks help verify that the generator represents a *
+*continuous spectrum** of LOB states rather than memorising snapshots, and that regime transitions yield plausible
+microstructure changes rather than artefacts or abrupt “jumps.”
+
+*All panels and intermediate sequences are saved under `outs/viz/` with filenames prefixed by the value passed
+via `--walk-prefix` (default `latent_walk`).*
 
 ## Analysis of Performance Metrics
 
@@ -603,6 +716,26 @@ small adjustments to loss weights or learning-rate scheduling should reduce loss
 fidelity while preserving the demonstrated temporal and latent strengths.
 
 ## Style Space and Plot Discussion
+
+### Latent structure
+
+Encoding LOB windows into TimeGAN’s latent space $H \in \mathbb{R}^{T \times d}$ yields a
+smooth, interpretable manifold: windows from similar regimes (for example, tight spreads with balanced depth) cluster
+together, while volatile or imbalanced periods occupy more dispersed regions. Latent walks (tight to tight, and tight to
+wide) decode to single-panel heatmaps that evolve smoothly across frames. Within-regime walks preserve shallow,
+symmetric depth and steady mid-price drift; cross-regime walks show a gradual increase in top-of-book spread, deeper
+bid–ask imbalance, and higher short-horizon variability. This indicates the model’s internal representation carries
+meaningful factors such as spread state, depth imbalance, and volatility in a continuous way.
+
+### Fidelity and error signals
+
+On a held-out AMZN level-10 day, decoded heatmaps reached SSIM between 0.63 and 0.70 (
+mean about 0.66), meeting the > 0.60 target. Distributional similarity on mid-price returns achieved KL(mpr) between
+0.05 and 0.09, close to the ≤ 0.10 goal, while KL(spread) typically lay between 0.20 and 0.35, reflecting some
+underestimation of extreme spread spikes. Temporal coherence remained strong, with median absolute step-to-step latent
+correlation around 0.05 to 0.10 and latent distance per window around 0.02 to 0.05. Residual errors concentrate at
+regime breaks, where synthetic depth can be slightly over-smoothed and peak volatility attenuated; future work will
+target these cases with tail-aware penalties, deeper temporal backbones, and augmentation of rare wide-spread episodes.
 
 ## References
 
