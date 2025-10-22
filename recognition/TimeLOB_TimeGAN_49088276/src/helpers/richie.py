@@ -1,4 +1,17 @@
-# src/helpers/richie.py
+#!/usr/bin/env python3
+"""
+Rich-powered logging helpers with animated status for CLI output.
+
+This module provides a small wrapper around `rich` to standardize console UX:
+
+- `log(msg)`: structured logging with Rich, falling back to `print`.
+- `status(msg)`: re-entrant-safe status context manager with a moving ellipsis.
+- `rule(text)`: horizontal rule separator.
+- `dataset_summary(...)`: formatted header and splits table for dataset stats.
+
+If `rich` is not available, all helpers degrade gracefully to plain text.
+"""
+
 from __future__ import annotations
 
 import contextvars
@@ -18,13 +31,20 @@ try:
 except Exception:  # fallback if rich isn’t installed
     _CONSOLE = None
 
-# track nesting depth per context/thread
+# Track nesting depth per context/thread for status() re-entrancy.
 _live_depth: contextvars.ContextVar[int] = contextvars.ContextVar(
     "_live_depth", default=0
 )
 
 
 def log(msg: str) -> None:
+    """Write a single log line to the console.
+
+    Uses Rich's Console.log when available, otherwise falls back to print().
+
+    Args:
+        msg: Text to log.
+    """
     if _CONSOLE:
         _CONSOLE.log(msg)
     else:
@@ -32,9 +52,21 @@ def log(msg: str) -> None:
 
 
 def status(msg: str):
-    """Re-entrant-safe status spinner with animated ellipsis.
-    - Outermost call starts a Rich status + a background thread that updates the text with a moving ellipsis.
-    - Nested calls become no-ops to avoid stacking spinners.
+    """Return a re-entrant-safe status context manager with animated ellipsis.
+
+    The outermost `with status("..."):` call starts a Rich status spinner and a
+    tiny background thread that appends a moving ellipsis to the message at a
+    fixed cadence. Nested calls are no-ops to avoid stacking multiple spinners.
+
+    Example:
+        with status("Loading data"):
+            ...  # long-running work
+
+    Args:
+        msg: Base message to display next to the spinner.
+
+    Returns:
+        A context manager suitable for `with` statements.
     """
     depth = _live_depth.get()
     if _CONSOLE and depth == 0:
@@ -45,13 +77,14 @@ def status(msg: str):
         )
 
         class _Wrapper:
+            """Context manager that manages spinner lifecycle and animation."""
+
             def __enter__(self):
                 self._token = _live_depth.set(depth + 1)
                 self._ctx = rich_status.__enter__()
 
-                # start a tiny background updater that animates the message
                 def _tick():
-                    # small initial delay so first frame shows base msg
+                    """Animate ellipsis by updating the status message periodically."""
                     next_tick = time.time() + 0.35
                     while not stop_flag.wait(timeout=max(0.0, next_tick - time.time())):
                         try:
@@ -68,8 +101,8 @@ def status(msg: str):
                 return self._ctx
 
             def __exit__(self, exc_type, exc, tb):
+                """Stop animation, restore base message, and exit the Rich status."""
                 try:
-                    # stop animation and restore base message for a clean exit frame
                     stop_flag.set()
                     if hasattr(self, "_thr"):
                         self._thr.join(timeout=0.3)
@@ -83,8 +116,10 @@ def status(msg: str):
 
         return _Wrapper()
 
-    # nested: no-op to keep output clean
+    # Nested calls: return a no-op context manager to keep output clean.
     class _Noop:
+        """No-op context manager used for nested `status` calls."""
+
         def __enter__(self):
             return None
 
@@ -95,6 +130,11 @@ def status(msg: str):
 
 
 def rule(text: str = "") -> None:
+    """Draw a horizontal rule in the console.
+
+    Args:
+        text: Optional caption rendered in the rule.
+    """
     if _CONSOLE:
         _CONSOLE.rule(text)
 
@@ -105,11 +145,22 @@ def dataset_summary(
     seq_len: int,
     dtype_name: str,
     filter_zero_rows: bool,
-    splits: Iterable[Tuple[str, Tuple[int, int]]],  # (name, (rows, windows))
+    splits: Iterable[Tuple[str, Tuple[int, int]]],
 ) -> None:
-    """Render a header + splits table."""
+    """Render a dataset header panel and a splits table.
+
+    On Rich consoles, shows a styled panel with file path, sequence length,
+    dtype, and zero-row filtering, followed by a table of split sizes and
+    window counts. Falls back to plain text when Rich is unavailable.
+
+    Args:
+        file_path: Path to the loaded orderbook file.
+        seq_len: Sequence length used for windowing.
+        dtype_name: Name of the dtype used for arrays (e.g., 'float32').
+        filter_zero_rows: Whether zero-containing rows were filtered out.
+        splits: Iterable of (split_name, (rows, windows)) entries.
+    """
     if _CONSOLE is None:
-        # Plain fallback
         print(
             f"Dataset: {file_path} | seq_len={seq_len} | dtype={dtype_name} | filter_zero_rows={filter_zero_rows}"
         )
